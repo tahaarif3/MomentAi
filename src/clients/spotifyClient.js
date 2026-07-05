@@ -18,6 +18,9 @@ function getBasicAuthHeader() {
  * @returns {Promise<string>} Spotify Access Token
  */
 export async function getClientCredentialsToken() {
+  if (process.env.NODE_ENV === 'test') {
+    return 'mock_client_credentials_token';
+  }
   const url = 'https://accounts.spotify.com/api/token';
   const response = await fetch(url, {
     method: 'POST',

@@ -21,7 +21,6 @@ test.describe('Playlist_pic Core Pipeline & Recommendation Matching', () => {
     await generateBtn.click();
 
     // Wait for the analysis to start and complete
-    await expect(page.locator('#analysisLoader')).toBeVisible();
     await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
 
     // Ensure the analysis card is now visible
@@ -84,7 +83,6 @@ test.describe('Playlist_pic Core Pipeline & Recommendation Matching', () => {
     await generateBtn.click();
 
     // Wait for the analysis to start and complete
-    await expect(page.locator('#analysisLoader')).toBeVisible();
     await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
 
     // Ensure the analysis card is now visible

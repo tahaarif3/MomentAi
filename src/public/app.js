@@ -1182,7 +1182,10 @@ function downloadVibeCardImage() {
   if (imgElement && imgElement.src) {
     // If image is loaded, draw it
     const tempImg = new Image();
-    tempImg.crossOrigin = 'anonymous'; // Enable CORS if loaded from remote source
+    // Only enable CORS if it's an external remote URL to prevent failures on local blob or same-origin paths
+    if (imgElement.src.startsWith('http') && !imgElement.src.includes(window.location.host)) {
+      tempImg.crossOrigin = 'anonymous';
+    }
     tempImg.onload = function() {
       ctx.save();
       
