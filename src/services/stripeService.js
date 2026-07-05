@@ -59,11 +59,11 @@ export async function getOrCreateStripeCustomer(db, user) {
   const customer = await stripe.customers.create({
     email: user.email || undefined,
     name: user.display_name || undefined,
-    metadata: { spotify_id: user.spotify_id }
+    metadata: { user_id: user.id }
   });
 
   await db.user.update({
-    where: { spotify_id: user.spotify_id },
+    where: { id: user.id },
     data: { stripe_customer_id: customer.id }
   });
 
@@ -72,7 +72,7 @@ export async function getOrCreateStripeCustomer(db, user) {
 
 export async function createCheckoutSession({
   customerId,
-  spotifyUserId,
+  userId,
   purchaseType,
   priceId
 }) {
@@ -85,14 +85,14 @@ export async function createCheckoutSession({
     success_url: `${appBaseUrl}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appBaseUrl}/?payment=cancelled`,
     metadata: {
-      spotify_user_id: spotifyUserId,
+      user_id: userId,
       purchase_type: purchaseType
     },
     ...(isSubscription
       ? {
           subscription_data: {
             metadata: {
-              spotify_user_id: spotifyUserId,
+              user_id: userId,
               purchase_type: purchaseType
             }
           }

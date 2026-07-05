@@ -16,13 +16,27 @@ const API_BASE = (
   window.location.protocol === 'capacitor:' ||
   (window.location.hostname === 'localhost' && !window.location.port)
 )
-  ? 'https://your-server-domain.com' // <-- REPLACE WITH YOUR HOSTED API DOMAIN
+  ? 'https://momentai.dev'
   : '';
 
-// Helper wrapper for fetches to support cross-origin API credentials (cookies) in Capacitor
+// ─── Supabase Auth Client ─────────────────────────────────────────────────────
+let supabase = null;
+let supabaseAccessToken = null;
+let authInitialized = false;
+let authInitPromise = null;
+
+// Helper wrapper for fetches — includes Supabase JWT in Authorization header
 async function apiFetch(path, options = {}) {
   const url = `${API_BASE}${path}`;
   options.credentials = 'include';
+  if (!options.headers) options.headers = {};
+  if (supabaseAccessToken) {
+    if (options.headers instanceof Headers) {
+      options.headers.set('Authorization', `Bearer ${supabaseAccessToken}`);
+    } else {
+      options.headers['Authorization'] = `Bearer ${supabaseAccessToken}`;
+    }
+  }
   return fetch(url, options);
 }
 
@@ -48,7 +62,7 @@ let currentAudioVolume = 0.5;
 
 // DOM Elements
 const userPanel = document.getElementById('userPanel');
-const btnConnectSpotify = document.getElementById('btnConnectSpotify');
+const btnSignIn = document.getElementById('btnSignIn');
 const uploadCard = document.getElementById('uploadCard');
 const landingStack = document.getElementById('landingStack');
 const analysisCard = document.getElementById('analysisCard');
@@ -92,8 +106,6 @@ const btnCancelSave = document.getElementById('btnCancelSave');
 const btnConfirmSave = document.getElementById('btnConfirmSave');
 const modalPlaylistName = document.getElementById('modalPlaylistName');
 const modalPlaylistDescription = document.getElementById('modalPlaylistDescription');
-const privacyPublic = document.getElementById('privacyPublic');
-const privacyPrivate = document.getElementById('privacyPrivate');
 const modalUploadCover = document.getElementById('modalUploadCover');
 
 // Export Success Modal elements
@@ -108,7 +120,7 @@ const tokenModal = document.getElementById('tokenModal');
 const btnTokenClose = document.getElementById('btnTokenClose');
 const btnBuyTokens = document.getElementById('btnBuyTokens');
 const btnBuyPremium = document.getElementById('btnBuyPremium');
-const spotifyAuthGateModal = document.getElementById('spotifyAuthGateModal');
+const signInGateModal = document.getElementById('signInGateModal');
 const btnUploadMoment = document.getElementById('btnUploadMoment');
 const btnNewPhoto = document.getElementById('btnNewPhoto');
 const aestheticTitle = document.getElementById('aestheticTitle');
@@ -138,8 +150,8 @@ function hidePreviewCtas() {
 }
 
 // Initialization
-document.addEventListener('DOMContentLoaded', () => {
-  checkAuth();
+document.addEventListener('DOMContentLoaded', async () => {
+  await initSupabaseAuth();
   setupEventListeners();
   setupDeepLinkListener();
   handlePaymentReturn();
@@ -160,14 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Setup event listeners
 function setupEventListeners() {
-  // Connect Spotify
-  if (btnConnectSpotify) {
-    btnConnectSpotify.addEventListener('click', connectSpotify);
-  }
-  
-  const btnConnectSpotifyGate = document.getElementById('btnConnectSpotifyGate');
-  if (btnConnectSpotifyGate) {
-    btnConnectSpotifyGate.addEventListener('click', connectSpotify);
+  // Sign in
+  if (btnSignIn) {
+    btnSignIn.addEventListener('click', () => openAuthModal('signin'));
   }
 
   // Drag and drop events
@@ -270,7 +277,18 @@ function setupEventListeners() {
   
   const btnAuthGateClose = document.getElementById('btnAuthGateClose');
   if (btnAuthGateClose) {
-    btnAuthGateClose.addEventListener('click', () => toggleModal(spotifyAuthGateModal, false));
+    btnAuthGateClose.addEventListener('click', () => toggleModal(signInGateModal, false));
+  }
+
+  // Email Auth Modal Events
+  const authForm = document.getElementById('authForm');
+  if (authForm) {
+    authForm.addEventListener('submit', handleAuthSubmit);
+  }
+
+  const btnToggleAuthMode = document.getElementById('btnToggleAuthMode');
+  if (btnToggleAuthMode) {
+    btnToggleAuthMode.addEventListener('click', toggleAuthMode);
   }
 
   btnTokenClose.addEventListener('click', () => toggleModal(tokenModal, false));
@@ -278,9 +296,83 @@ function setupEventListeners() {
   btnBuyPremium.addEventListener('click', upgradePremium);
 }
 
-// Fetch Auth State
-async function checkAuth() {
+// Initialize Supabase Auth and check for existing session
+async function initSupabaseAuth() {
+  if (authInitPromise) {
+    return authInitPromise;
+  }
+
+  authInitPromise = (async () => {
+  // Fetch Supabase configuration from backend config endpoint
+    try {
+      const configRes = await fetch(`${API_BASE}/api/auth/config`);
+      if (!configRes.ok) {
+        throw new Error('Failed to fetch Auth config from backend');
+      }
+      const config = await configRes.json();
+      if (!config.supabaseUrl || !config.supabaseAnonKey) {
+        console.warn('Supabase URL or Anon Key is missing from config endpoints.');
+        renderDisconnectedPanel();
+        return;
+      }
+      
+      // Dynamically initialize Supabase client if window.supabase is available
+      if (window.supabase && !supabase) {
+        supabase = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+      }
+    } catch (err) {
+      console.error('Failed to configure Supabase Auth client:', err);
+      renderDisconnectedPanel();
+      return;
+    }
+
+    if (!supabase) {
+      console.warn('Supabase client not initialized');
+      renderDisconnectedPanel();
+      return;
+    }
+
+    if (!authInitialized) {
+      // Listen for auth state changes (login, logout, token refresh)
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log('Auth state change:', event);
+        if (session) {
+          supabaseAccessToken = session.access_token;
+          await syncUserWithBackend();
+        } else {
+          supabaseAccessToken = null;
+          authState.loggedIn = false;
+          authState.user = null;
+          renderDisconnectedPanel();
+        }
+      });
+      authInitialized = true;
+    }
+
+    // Check for existing session on page load
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      supabaseAccessToken = session.access_token;
+      await syncUserWithBackend();
+    } else {
+      renderDisconnectedPanel();
+    }
+  })();
+
   try {
+    await authInitPromise;
+  } finally {
+    authInitPromise = null;
+  }
+}
+
+// Sync Supabase user with our backend database
+async function syncUserWithBackend() {
+  try {
+    // First, upsert the user via callback
+    await apiFetch('/api/auth/callback', { method: 'POST' });
+
+    // Then fetch the user profile
     const res = await apiFetch('/api/auth/me');
     if (res.ok) {
       const data = await res.json();
@@ -291,9 +383,109 @@ async function checkAuth() {
       renderDisconnectedPanel();
     }
   } catch (error) {
-    console.error("Auth check failed:", error);
+    console.error('Backend sync failed:', error);
     renderDisconnectedPanel();
   }
+}
+
+let currentAuthMode = 'signin';
+
+// Open the Email Auth Modal
+async function openAuthModal(mode = 'signin') {
+  currentAuthMode = mode;
+  updateAuthModalUI();
+  await toggleModal(signInGateModal, true);
+}
+
+// Toggle between Sign In and Sign Up modes
+function toggleAuthMode() {
+  currentAuthMode = currentAuthMode === 'signin' ? 'signup' : 'signin';
+  updateAuthModalUI();
+}
+
+// Update the Email Auth Modal UI text based on the active mode
+function updateAuthModalUI() {
+  const authModalTitle = document.getElementById('authModalTitle');
+  const btnSubmitAuth = document.getElementById('btnSubmitAuth');
+  const authToggleText = document.getElementById('authToggleText');
+  const btnToggleAuthMode = document.getElementById('btnToggleAuthMode');
+  
+  if (currentAuthMode === 'signin') {
+    if (authModalTitle) authModalTitle.textContent = 'Sign in to MomentAI';
+    if (btnSubmitAuth) btnSubmitAuth.textContent = 'Sign In';
+    if (authToggleText) authToggleText.textContent = "Don't have an account?";
+    if (btnToggleAuthMode) btnToggleAuthMode.textContent = 'Sign Up';
+  } else {
+    if (authModalTitle) authModalTitle.textContent = 'Create MomentAI Account';
+    if (btnSubmitAuth) btnSubmitAuth.textContent = 'Sign Up';
+    if (authToggleText) authToggleText.textContent = 'Already have an account?';
+    if (btnToggleAuthMode) btnToggleAuthMode.textContent = 'Sign In';
+  }
+}
+
+// Handle Email / Password authentication form submission
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  
+  const emailInput = document.getElementById('authEmail');
+  const passwordInput = document.getElementById('authPassword');
+  const btnSubmitAuth = document.getElementById('btnSubmitAuth');
+  
+  if (!emailInput || !passwordInput || !supabase) return;
+  
+  const email = emailInput.value.trim();
+  const password = passwordInput.value;
+  
+  setButtonLoading(btnSubmitAuth, true);
+  
+  try {
+    let result;
+    if (currentAuthMode === 'signin') {
+      result = await supabase.auth.signInWithPassword({ email, password });
+    } else {
+      result = await supabase.auth.signUp({ email, password });
+    }
+    
+    if (result.error) {
+      throw result.error;
+    }
+    
+    // Close modal on success
+    await toggleModal(signInGateModal, false);
+    
+    // Clear fields
+    emailInput.value = '';
+    passwordInput.value = '';
+    
+    if (currentAuthMode === 'signup') {
+      alert('Account created! Please check your email for confirmation (if enabled) or sign in.');
+    }
+  } catch (error) {
+    console.error('Authentication failed:', error);
+    alert(error.message || 'Authentication failed. Please check your credentials.');
+  } finally {
+    setButtonLoading(btnSubmitAuth, false);
+  }
+}
+
+// Legacy checkAuth function - now delegates to initSupabaseAuth
+async function checkAuth() {
+  if (!supabase) {
+    await initSupabaseAuth();
+    return;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    supabaseAccessToken = null;
+    authState.loggedIn = false;
+    authState.user = null;
+    renderDisconnectedPanel();
+    return;
+  }
+
+  supabaseAccessToken = session.access_token;
+  await syncUserWithBackend();
 }
 
 // Render User Status
@@ -312,7 +504,7 @@ function renderUserPanel() {
       <span class="user-name">${escapeHtml(user.displayName)}</span>
       <div class="user-meta">
         ${badgeHtml}
-        <button class="btn-text" id="btnLogout">Disconnect</button>
+        <button class="btn-text" id="btnLogout">Sign out</button>
       </div>
     </div>
     ${user.tier === 'free' ? '<button class="btn btn-secondary" id="btnShowBilling">Upgrade</button>' : '<button class="btn btn-secondary" id="btnManageBilling">Manage subscription</button>'}
@@ -336,30 +528,59 @@ function renderUserPanel() {
 
 function renderDisconnectedPanel() {
   userPanel.innerHTML = `
-    <button class="btn btn-spotify-connect" id="btnConnectSpotify" type="button">Connect</button>
+    <button class="btn btn-primary" id="btnSignIn" type="button" style="border-radius:20px">Sign in</button>
   `;
-  document.getElementById('btnConnectSpotify').addEventListener('click', connectSpotify);
+  document.getElementById('btnSignIn').addEventListener('click', () => openAuthModal('signin'));
   
   updatePlaylistBlurState();
 }
 
 // Update Playlist Blur State helper
 function updatePlaylistBlurState() {
-  const playlistCard = document.querySelector('.playlist-card');
-  if (playlistCard) {
-    const isLocked = !authState.loggedIn || (authState.user && authState.user.tier === 'free' && authState.user.tokens <= 0);
-    if (isLocked) {
-      playlistCard.classList.add('preview-locked');
+  const trackCards = document.querySelectorAll('#tracklistContainer .track-card');
+  const VISIBLE_TRACKS = 3;
+  
+  trackCards.forEach((card, index) => {
+    if (!authState.loggedIn && index >= VISIBLE_TRACKS) {
+      card.classList.add('track-blurred');
     } else {
-      playlistCard.classList.remove('preview-locked');
+      card.classList.remove('track-blurred');
     }
+  });
+
+  // Remove existing banner if any
+  const existingBanner = document.getElementById('blurSignInBanner');
+  if (existingBanner) {
+    existingBanner.remove();
+  }
+
+  // If anonymous and has blurred tracks, append the Sign In banner
+  if (!authState.loggedIn && trackCards.length > VISIBLE_TRACKS) {
+    const banner = document.createElement('div');
+    banner.id = 'blurSignInBanner';
+    banner.className = 'blur-signin-banner';
+    banner.innerHTML = `
+      <div class="blur-banner-content">
+        <span class="blur-banner-icon">🔒</span>
+        <p>Sign in to see all ${trackCards.length} tracks and save your playlist</p>
+        <button class="btn btn-primary btn-sm" id="btnBlurSignIn" type="button" style="border-radius:20px">
+          Sign in
+        </button>
+      </div>
+    `;
+    tracklistContainer.appendChild(banner);
+    document.getElementById('btnBlurSignIn').addEventListener('click', () => openAuthModal('signin'));
   }
 }
 
 // Logout
 async function logout() {
   try {
-    await apiFetch('/api/auth/logout');
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+    supabaseAccessToken = null;
     authState.loggedIn = false;
     authState.user = null;
     renderDisconnectedPanel();
@@ -546,7 +767,7 @@ async function importPlaylistFromUrl() {
       btnSavePlaylist.textContent = "Clone Playlist to Spotify";
       btnSavePlaylist.disabled = false;
     } else {
-      playlistStatusText.textContent = "Connect Spotify to clone this playlist to your library";
+      playlistStatusText.textContent = "Sign in to save this playlist to Spotify";
     }
 
   } catch (error) {
@@ -599,15 +820,13 @@ async function uploadAndProcessImage(file) {
     renderAnalysisResults(result.metadata);
     refreshPlaylistEditor();
 
-    // Always show Save to Spotify and Share Vibe buttons to trigger inverted onboarding auth gate
+    // Always show Save to Spotify
     showPreviewCtas();
     btnSavePlaylist.textContent = "Save Playlist to Spotify";
     btnSavePlaylist.disabled = false;
-    
 
-    
     if (!authState.loggedIn) {
-      playlistStatusText.textContent = "Connect Spotify to export your visual playlist";
+      playlistStatusText.textContent = "Sign in to see all tracks and save to Spotify";
     }
 
   } catch (error) {
@@ -783,7 +1002,6 @@ function refreshPlaylistEditor() {
 
 function renderPlaylistTracks(tracks) {
   tracklistContainer.innerHTML = '';
-  updatePlaylistBlurState();
 
   if (tracks.length === 0) {
     tracklistContainer.innerHTML = `
@@ -799,6 +1017,8 @@ function renderPlaylistTracks(tracks) {
   tracks.forEach((track, index) => {
     tracklistContainer.insertAdjacentHTML('beforeend', buildTrackCardMarkup(track, index, 'playlist'));
   });
+
+  updatePlaylistBlurState();
 
   staggerIn(tracklistContainer, '.track-card', 40);
   showPreviewCtas();
@@ -1047,7 +1267,7 @@ async function savePlaylistToSpotify() {
   if (!currentGeneration.tracks.length) return;
 
   if (!authState.loggedIn) {
-    await toggleModal(spotifyAuthGateModal, true);
+    await toggleModal(signInGateModal, true);
     return;
   }
 
@@ -1058,7 +1278,6 @@ async function savePlaylistToSpotify() {
   // Prefill form
   modalPlaylistName.value = defaultPlaylistName;
   modalPlaylistDescription.value = defaultDescription;
-  privacyPublic.checked = true;
   modalUploadCover.checked = true;
 
   // Open modal
@@ -1103,7 +1322,7 @@ function getResizedCoverArtBase64(file) {
 
 // Show custom success modal
 function showExportSuccessModal(playlistName, url) {
-  successModalText.textContent = `Playlist "${playlistName}" was created successfully on your Spotify account!`;
+  successModalText.textContent = `Playlist "${playlistName}" is live! Open it on Spotify and tap Save (➕) to add it to your library.`;
   linkOpenSpotify.href = url;
   toggleModal(successModal, true);
 }
@@ -1112,7 +1331,7 @@ function showExportSuccessModal(playlistName, url) {
 async function confirmSavePlaylistToSpotify() {
   const playlistName = modalPlaylistName.value.trim();
   const playlistDescription = modalPlaylistDescription.value.trim();
-  const isPublic = privacyPublic.checked;
+  const isPublic = true;
   const uploadCover = modalUploadCover.checked;
 
   if (!playlistName) {
@@ -1308,19 +1527,7 @@ function escapeHtml(string) {
   return String(string).replace(/[&<>"']/g, function(m) { return map[m]; });
 }
 
-// Mobile Login Trigger helper
-function connectSpotify() {
-  const loginUrl = `${API_BASE}/api/auth/login?platform=mobile`;
-  
-  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
-    window.Capacitor.Plugins.Browser.open({ url: loginUrl });
-  } else {
-    // Web redirect fallback
-    window.location.href = API_BASE ? loginUrl : '/api/auth/login';
-  }
-}
-
-// Register deep link listener to handle Spotify OAuth redirects back to the mobile app
+// Deep link listener — simplified for Supabase Auth
 function setupDeepLinkListener() {
   if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
     window.Capacitor.Plugins.App.addListener('appUrlOpen', async (event) => {
@@ -1331,24 +1538,11 @@ function setupDeepLinkListener() {
         await window.Capacitor.Plugins.Browser.close();
       }
       
-      try {
-        const url = new URL(event.url);
-        // Deep link structure: playlistpic://auth-callback?spotify_user_id=...
-        if (url.host === 'auth-callback' || url.pathname.includes('auth-callback')) {
-          const userId = url.searchParams.get('spotify_user_id');
-          if (userId) {
-            // Set cookie in local webview environment
-            document.cookie = `spotify_user_id=${userId}; path=/; max-age=${30 * 24 * 60 * 60};`;
-            // Refresh authentication state
-            checkAuth();
-          }
-        }
-      } catch (err) {
-        console.error('Failed to parse app deep link:', err);
-      }
+      // Supabase handles the OAuth callback automatically.
+      // We just re-check authentication state.
+      await initSupabaseAuth();
     });
   }
 }
 
 // Show Vibe Card
-

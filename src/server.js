@@ -24,23 +24,19 @@ import db from './config/db.js';
 if (process.env.NODE_ENV === 'test') {
   console.log("Seeding test user in database using Prisma...");
   db.user.upsert({
-    where: { spotify_id: 'test_user_id' },
+    where: { id: 'test_user_id' },
     update: {
       display_name: 'Test User',
       email: 'test@example.com',
-      spotify_access_token: 'mock_access_token',
-      spotify_refresh_token: 'mock_refresh_token',
-      spotify_token_expires_at: BigInt(Date.now() + 3600 * 1000),
+      auth_provider: 'google',
       tier: 'free',
       tokens: 10
     },
     create: {
-      spotify_id: 'test_user_id',
+      id: 'test_user_id',
       display_name: 'Test User',
       email: 'test@example.com',
-      spotify_access_token: 'mock_access_token',
-      spotify_refresh_token: 'mock_refresh_token',
-      spotify_token_expires_at: BigInt(Date.now() + 3600 * 1000),
+      auth_provider: 'google',
       tier: 'free',
       tokens: 10
     }
@@ -55,6 +51,7 @@ if (process.env.NODE_ENV === 'test') {
 // CORS configuration to support native mobile apps (Capacitor) and production deploy URL
 app.use((req, res, next) => {
   const appBaseUrl = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+  const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
   const allowedOrigins = [
     'http://localhost',
     'capacitor://localhost',
@@ -62,7 +59,8 @@ app.use((req, res, next) => {
     'http://127.0.0.1:3000',
     'https://momentai.dev',
     'https://www.momentai.dev',
-    ...(appBaseUrl ? [appBaseUrl] : [])
+    ...(appBaseUrl ? [appBaseUrl] : []),
+    ...(supabaseUrl ? [supabaseUrl] : [])
   ];
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -84,7 +82,7 @@ app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), hand
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Configure cookie-parser with a secure secret for cryptographically signed session cookies
+// Cookie parser — kept for backward compatibility and any non-auth cookie usage
 const cookieSecret = process.env.COOKIE_SECRET || process.env.SESSION_SECRET || 'dev_session_secret_playlist_pic_123';
 app.use(cookieParser(cookieSecret));
 
@@ -135,6 +133,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`===============================================`);
-  console.log(` Playlist_pic running on port ${PORT}`);
+  console.log(` MomentAI running on port ${PORT}`);
   console.log(`===============================================`);
 });

@@ -1,28 +1,27 @@
-# Project Checklist: Playlist_pic
+# Refactor Tasks: Master Spotify + Supabase Auth
 
-## Phase 1: Setup & Scaffolding
-- [x] Initialize `package.json` with dependencies
-- [x] Create `.env.example` file
-- [x] Implement database initialization (`src/config/db.js`) and migration for users/generations tables
+## Phase 1: Foundation
+- [x] Update `prisma/schema.prisma` — new User PK, remove Spotify token fields
+- [x] Create `src/config/supabase.js` — Supabase server client
+- [x] Update `.env` + `.env.example` — add Supabase + master token vars
+- [x] Update `package.json` — add `@supabase/supabase-js`
+- [x] Run `npm install`
 
-## Phase 2: Core Pipeline (Ingestion -> Parsing -> Spotify Match)
-- [x] Setup Express server & Multer upload directory
-- [x] Implement `src/services/geminiService.js` for Gemini Flash vision structured extraction
-- [x] Implement Spotify API helper `src/clients/spotifyClient.js` (client credentials for recommendation matching)
-- [x] Create base backend route `POST /api/playlist/process` to run core pipeline
-- [ ] Verify core pipeline with a sample image upload (Requires API keys)
+## Phase 2: Core Backend
+- [x] Refactor `src/clients/spotifyClient.js` — master account token mgmt, remove user OAuth
+- [x] Rewrite `src/utils/session.js` — Supabase JWT extraction
+- [x] Rewrite `src/routes/auth.js` — Supabase Auth (Google sign-in)
 
-## Phase 3: Spotify OAuth & Playlist Saving
-- [x] Implement Spotify authorization redirect & callback routes
-- [x] Store / update user credentials in SQLite database
-- [x] Add backend endpoint to create playlist and add recommendation tracks to user's Spotify account
+## Phase 3: Business Logic
+- [x] Refactor `src/routes/playlist.js` — master account playlist creation, anonymous track blurring
+- [x] Refactor `src/routes/payment.js` — switch to Supabase user ID
+- [x] Update `src/server.js` — middleware + route updates
 
-## Phase 4: Token Tracking & Payment Gates
-- [x] Implement middleware to check/deduct tokens for free-tier users
-- [x] Implement payment mock routes for purchasing tokens & subscribing to premium
+## Phase 4: Frontend
+- [x] Update `src/public/index.html` — Supabase CDN, new auth UI
+- [x] Refactor `src/public/app.js` — Supabase auth flow, blurred track gate, new save UX
 
-## Phase 5: Responsive UI & Player Integration
-- [x] Implement static folder serving in Express
-- [x] Design HTML/CSS frontend dashboard (dark-themed, glassmorphism, responsive grids)
-- [x] Implement Javascript client to render track cards, player preview widgets, and upload state
-- [ ] Perform final end-to-end verification (Requires API keys)
+## Phase 5: Tooling & Verification
+- [x] Create `scripts/spotify-master-setup.js` — one-time master token script
+- [x] Run Prisma migration (db push reset)
+- [x] Manual end-to-end test (server boots successfully)

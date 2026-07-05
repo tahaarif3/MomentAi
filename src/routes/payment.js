@@ -1,6 +1,6 @@
 import express from 'express';
 import db from '../config/db.js';
-import { getSpotifyUserId } from '../utils/session.js';
+import { getAuthUserId } from '../utils/session.js';
 import {
   createCheckoutSession,
   createPortalSession,
@@ -15,16 +15,21 @@ import {
 const router = express.Router();
 
 function requireAuth(req, res, next) {
-  const spotifyUserId = getSpotifyUserId(req);
-  if (!spotifyUserId) {
-    return res.status(401).json({ success: false, message: 'Please connect Spotify to perform this action.' });
-  }
-  req.spotifyUserId = spotifyUserId;
-  next();
+  // getAuthUserId is async, so we wrap it
+  getAuthUserId(req).then(userId => {
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Please sign in to perform this action.' });
+    }
+    req.userId = userId;
+    next();
+  }).catch(err => {
+    console.error('Auth check error:', err);
+    res.status(500).json({ success: false, message: 'Authentication error.' });
+  });
 }
 
-async function findUserOr404(spotifyUserId, res) {
-  const user = await db.user.findUnique({ where: { spotify_id: spotifyUserId } });
+async function findUserOr404(userId, res) {
+  const user = await db.user.findUnique({ where: { id: userId } });
   if (!user) {
     res.status(404).json({ success: false, message: 'User not found.' });
     return null;
@@ -44,16 +49,16 @@ async function claimStripeEvent(eventId) {
   }
 }
 
-async function creditTokenPack(spotifyUserId) {
+async function creditTokenPack(userId) {
   return db.user.update({
-    where: { spotify_id: spotifyUserId },
+    where: { id: userId },
     data: { tokens: { increment: TOKEN_PACK_CREDITS } }
   });
 }
 
-async function activatePremium(spotifyUserId, subscriptionId) {
+async function activatePremium(userId, subscriptionId) {
   return db.user.update({
-    where: { spotify_id: spotifyUserId },
+    where: { id: userId },
     data: {
       tier: 'premium',
       stripe_subscription_id: subscriptionId || undefined
@@ -61,9 +66,9 @@ async function activatePremium(spotifyUserId, subscriptionId) {
   });
 }
 
-async function deactivatePremium(spotifyUserId) {
+async function deactivatePremium(userId) {
   return db.user.update({
-    where: { spotify_id: spotifyUserId },
+    where: { id: userId },
     data: {
       tier: 'free',
       stripe_subscription_id: null
@@ -78,35 +83,35 @@ async function handleCheckoutCompleted(session) {
     return;
   }
 
-  const spotifyUserId = session.metadata?.spotify_user_id;
+  const userId = session.metadata?.user_id;
   const purchaseType = session.metadata?.purchase_type;
 
-  if (!spotifyUserId || !purchaseType) {
+  if (!userId || !purchaseType) {
     console.warn('Checkout session completed without expected metadata:', session.id);
     return;
   }
 
   if (purchaseType === 'token_pack') {
-    await creditTokenPack(spotifyUserId);
+    await creditTokenPack(userId);
     return;
   }
 
   if (purchaseType === 'premium') {
-    await activatePremium(spotifyUserId, session.subscription);
+    await activatePremium(userId, session.subscription);
   }
 }
 
 async function handleSubscriptionChange(subscription) {
-  const spotifyUserId = subscription.metadata?.spotify_user_id;
-  if (!spotifyUserId) {
+  const userId = subscription.metadata?.user_id;
+  if (!userId) {
     return;
   }
 
   const isActive = ['active', 'trialing'].includes(subscription.status);
   if (isActive) {
-    await activatePremium(spotifyUserId, subscription.id);
+    await activatePremium(userId, subscription.id);
   } else {
-    await deactivatePremium(spotifyUserId);
+    await deactivatePremium(userId);
   }
 }
 
@@ -131,7 +136,7 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
   }
 
   try {
-    const user = await findUserOr404(req.spotifyUserId, res);
+    const user = await findUserOr404(req.userId, res);
     if (!user) return;
 
     const customerId = await getOrCreateStripeCustomer(db, user);
@@ -141,7 +146,7 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
 
     const session = await createCheckoutSession({
       customerId,
-      spotifyUserId: req.spotifyUserId,
+      userId: req.userId,
       purchaseType,
       priceId
     });
@@ -166,7 +171,7 @@ router.post('/create-portal-session', requireAuth, async (req, res) => {
   }
 
   try {
-    const user = await findUserOr404(req.spotifyUserId, res);
+    const user = await findUserOr404(req.userId, res);
     if (!user) return;
 
     const customerId = await getOrCreateStripeCustomer(db, user);
@@ -193,7 +198,7 @@ router.post('/purchase-tokens', requireAuth, async (req, res) => {
   }
 
   try {
-    const user = await creditTokenPack(req.spotifyUserId);
+    const user = await creditTokenPack(req.userId);
     res.json({
       success: true,
       message: `Payment successful! ${TOKEN_PACK_CREDITS} tokens have been credited to your account.`,
@@ -223,7 +228,7 @@ router.post('/subscribe', requireAuth, async (req, res) => {
   }
 
   try {
-    const user = await activatePremium(req.spotifyUserId);
+    const user = await activatePremium(req.userId);
     res.json({
       success: true,
       message: 'Welcome to Premium! You now have unlimited playlist generations and advanced mood control.',
@@ -253,7 +258,7 @@ router.post('/cancel-subscription', requireAuth, async (req, res) => {
   }
 
   try {
-    const user = await deactivatePremium(req.spotifyUserId);
+    const user = await deactivatePremium(req.userId);
     res.json({
       success: true,
       message: 'Your subscription has been cancelled. You have returned to the Free tier.',

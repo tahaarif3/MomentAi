@@ -1,6 +1,24 @@
 /**
  * Spotify API Client Module
+ * 
+ * Uses two authentication flows:
+ * 1. Client Credentials — for catalog searches (no user context needed)
+ * 2. Master Account — a single dedicated Spotify account that creates public playlists
  */
+
+// ─── Master Account Token Cache ───────────────────────────────────────────────
+let masterTokenCache = {
+  accessToken: null,
+  expiresAt: 0
+};
+
+let masterUserIdCache = null;
+
+// ─── Client Credentials Token Cache ───────────────────────────────────────────
+let clientTokenCache = {
+  accessToken: null,
+  expiresAt: 0
+};
 
 // Helper to base64 encode Spotify Client Credentials
 function getBasicAuthHeader() {
@@ -12,6 +30,37 @@ function getBasicAuthHeader() {
   return 'Basic ' + Buffer.from(clientId + ':' + clientSecret).toString('base64');
 }
 
+// Shadow global fetch to automatically handle Spotify rate limits (429) and network retries
+const fetch = async function spotifyFetch(url, options = {}, retries = 3) {
+  const response = await globalThis.fetch(url, options);
+  
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get('Retry-After');
+    let delaySeconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 2;
+    
+    if (isNaN(delaySeconds)) {
+      delaySeconds = 2;
+    }
+    
+    const delayMs = (delaySeconds * 1000) + 200; // Add 200ms buffer
+    
+    // If the rate limit delay is excessive (more than 10 seconds), fail immediately
+    // to prevent hanging Node.js and to stop hammering Spotify.
+    if (delaySeconds > 10) {
+      console.error(`[Spotify API] 429 Rate Limit: Spotify requested a long wait of ${delaySeconds} seconds. Failing immediately to prevent lockout.`);
+      throw new Error(`Spotify API rate limit is too high (${delaySeconds}s). Please try again in a few minutes.`);
+    }
+    
+    if (retries > 0) {
+      console.warn(`[Spotify API] 429 Rate Limit. Waiting ${delayMs}ms... (Retries left: ${retries})`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return spotifyFetch(url, options, retries - 1);
+    }
+  }
+  
+  return response;
+};
+
 /**
  * Fetch an Access Token using Spotify's Client Credentials flow.
  * Used for general catalog reading & recommendations without user OAuth.
@@ -21,6 +70,13 @@ export async function getClientCredentialsToken() {
   if (process.env.NODE_ENV === 'test') {
     return 'mock_client_credentials_token';
   }
+
+  // Return cached token if still valid (60s buffer)
+  if (clientTokenCache.accessToken && Date.now() < (clientTokenCache.expiresAt - 60000)) {
+    return clientTokenCache.accessToken;
+  }
+
+  console.log('Refreshing Spotify Client Credentials token...');
   const url = 'https://accounts.spotify.com/api/token';
   const response = await fetch(url, {
     method: 'POST',
@@ -39,66 +95,126 @@ export async function getClientCredentialsToken() {
   }
 
   const data = await response.json();
-  return data.access_token;
+  clientTokenCache = {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + (data.expires_in * 1000)
+  };
+
+  return clientTokenCache.accessToken;
 }
 
 /**
- * Generate Spotify OAuth Login URL
- * @param {string} state - Random security state string
- * @returns {string} Spotify Authorization URL
+ * Get a fresh access token for the Master Spotify Account.
+ * Uses the SPOTIFY_MASTER_REFRESH_TOKEN env var.
+ * Caches the token in memory and auto-refreshes when expired.
+ * @returns {Promise<string>} Master account access token
  */
-export function getAuthUrl(state) {
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
-  const scopes = [
-    'playlist-modify-public',
-    'playlist-modify-private',
-    'user-read-private',
-    'user-read-email',
-    'ugc-image-upload'
-  ].join(' ');
+export async function getMasterAccountToken() {
+  if (process.env.NODE_ENV === 'test') {
+    return 'mock_master_token';
+  }
 
-  return `https://accounts.spotify.com/authorize?${new URLSearchParams({
-    response_type: 'code',
-    client_id: clientId,
-    scope: scopes,
-    redirect_uri: redirectUri,
-    state: state
-  }).toString()}`;
+  const masterRefreshToken = process.env.SPOTIFY_MASTER_REFRESH_TOKEN;
+  if (!masterRefreshToken) {
+    throw new Error(
+      'SPOTIFY_MASTER_REFRESH_TOKEN is not set. Run "node scripts/spotify-master-setup.js" to obtain it.'
+    );
+  }
+
+  // Return cached token if still valid (60s buffer)
+  if (masterTokenCache.accessToken && Date.now() < (masterTokenCache.expiresAt - 60000)) {
+    return masterTokenCache.accessToken;
+  }
+
+  console.log('Refreshing Master Spotify Account token...');
+  const tokenData = await refreshUserToken(masterRefreshToken);
+
+  masterTokenCache = {
+    accessToken: tokenData.access_token,
+    expiresAt: Date.now() + (tokenData.expires_in * 1000)
+  };
+
+  return masterTokenCache.accessToken;
 }
 
 /**
- * Exchange Authorization Code for Spotify User Access and Refresh Tokens
- * @param {string} code - The auth code received from callback
- * @returns {Promise<object>} Token object { access_token, refresh_token, expires_in }
+ * Get the Spotify user ID of the Master Account.
+ * Cached after first lookup.
+ * @returns {Promise<string>} Master account Spotify user ID
  */
-export async function exchangeCodeForTokens(code) {
-  const url = 'https://accounts.spotify.com/api/token';
-  const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
+async function getMasterUserId() {
+  if (masterUserIdCache) return masterUserIdCache;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': getBasicAuthHeader(),
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code: code,
-      redirect_uri: redirectUri
-    })
+  if (process.env.NODE_ENV === 'test') {
+    masterUserIdCache = 'mock_master_user';
+    return masterUserIdCache;
+  }
+
+  const token = await getMasterAccountToken();
+  const response = await fetch('https://api.spotify.com/v1/me', {
+    headers: { 'Authorization': `Bearer ${token}` }
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Failed to exchange code: ${response.statusText} - ${errText}`);
+    throw new Error(`Failed to fetch master account profile: ${response.statusText} - ${errText}`);
   }
 
-  return await response.json();
+  const profile = await response.json();
+  masterUserIdCache = profile.id;
+  console.log(`Master Spotify Account: ${profile.display_name} (${profile.id})`);
+  return masterUserIdCache;
 }
 
 /**
- * Refresh an expired User Access Token
+ * Create a public playlist on the Master Account, populate it with tracks,
+ * and optionally upload cover art.
+ * @param {string} name - Playlist name
+ * @param {string} description - Playlist description
+ * @param {string[]} trackUris - Array of Spotify track URIs
+ * @param {string} [coverImageBase64] - Optional base64 JPEG cover image
+ * @returns {Promise<{playlistId: string, playlistUrl: string}>}
+ */
+export async function createMasterPlaylist(name, description, trackUris, coverImageBase64 = null) {
+  if (process.env.NODE_ENV === 'test') {
+    console.log('[TEST] Mocking master playlist creation...');
+    return {
+      playlistId: 'mock_playlist_123',
+      playlistUrl: 'https://open.spotify.com/playlist/mock_playlist_123'
+    };
+  }
+
+  const token = await getMasterAccountToken();
+  const masterUserId = await getMasterUserId();
+
+  // Create public playlist on master account
+  console.log(`Creating master playlist: "${name}" under account: ${masterUserId}`);
+  const playlist = await createPlaylist(masterUserId, token, name, description, true);
+  const playlistId = playlist.id;
+  const playlistUrl = playlist.external_urls.spotify;
+
+  // Add tracks
+  if (trackUris && trackUris.length > 0) {
+    console.log(`Adding ${trackUris.length} tracks to master playlist: ${playlistId}`);
+    await addTracksToPlaylist(token, playlistId, trackUris);
+  }
+
+  // Upload cover art if provided
+  if (coverImageBase64) {
+    try {
+      console.log(`Uploading cover art to master playlist: ${playlistId}`);
+      await uploadPlaylistCover(token, playlistId, coverImageBase64);
+    } catch (coverErr) {
+      console.error('Failed to upload cover art to master playlist:', coverErr);
+      // Non-fatal — the playlist is still created
+    }
+  }
+
+  return { playlistId, playlistUrl };
+}
+
+/**
+ * Refresh an expired User Access Token (used internally for master account)
  * @param {string} refreshToken - The stored user refresh token
  * @returns {Promise<object>} Token object { access_token, expires_in }
  */
@@ -120,26 +236,6 @@ export async function refreshUserToken(refreshToken) {
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`Failed to refresh token: ${response.statusText} - ${errText}`);
-  }
-
-  return await response.json();
-}
-
-/**
- * Fetch Current User Profile Details
- * @param {string} token - User Access Token
- * @returns {Promise<object>} Profile details { id, display_name, email }
- */
-export async function getUserProfile(token) {
-  const response = await fetch('https://api.spotify.com/v1/me', {
-    headers: {
-      'Authorization': `Bearer ${token}`
-    }
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Failed to fetch user profile: ${response.statusText} - ${errText}`);
   }
 
   return await response.json();
@@ -277,6 +373,7 @@ async function getRecommendationsFallback(token, seedGenres, customPrompt = '', 
       } catch (err) {
         console.warn(`Error searching for genre "${genre}" (page ${page}):`, err);
       }
+      await new Promise(resolve => setTimeout(resolve, 150));
     }
   }
 
@@ -329,6 +426,7 @@ async function getRecommendationsFallback(token, seedGenres, customPrompt = '', 
         } catch (err) {
           console.warn(`Error during general search for "${genre}" (page ${page}):`, err);
         }
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
     }
   }

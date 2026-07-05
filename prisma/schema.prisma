@@ -9,18 +9,17 @@ generator client {
 }
 
 model User {
-  spotify_id               String       @id
-  display_name             String?
-  email                    String?
-  spotify_access_token     String?
-  spotify_refresh_token    String?
-  spotify_token_expires_at BigInt?       // Stored as millisecond timestamp
-  tier                     String       @default("free")
-  tokens                   Int          @default(3)
-  stripe_customer_id       String?      @unique
-  stripe_subscription_id   String?
-  created_at               DateTime     @default(now())
-  generations              Generation[]
+  id                      String       @id                    // Supabase Auth UUID
+  display_name            String?
+  email                   String?      @unique
+  avatar_url              String?
+  auth_provider           String?                             // "google", "apple", etc.
+  tier                    String       @default("free")
+  tokens                  Int          @default(10)
+  stripe_customer_id      String?      @unique
+  stripe_subscription_id  String?
+  created_at              DateTime     @default(now())
+  generations             Generation[]
 
   @@map("users")
 }
@@ -47,7 +46,7 @@ model Generation {
   playlist_name         String?
   playlist_url          String?
   created_at            DateTime @default(now())
-  user                  User?    @relation(fields: [user_id], references: [spotify_id], onDelete: Cascade)
+  user                  User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("generations")
 }

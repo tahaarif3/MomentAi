@@ -6,8 +6,7 @@ import crypto from 'crypto';
 import db from '../config/db.js';
 import { parsePlaylistImage } from '../services/geminiService.js';
 import * as spotify from '../clients/spotifyClient.js';
-import { getValidUserToken } from './auth.js';
-import { getSpotifyUserId } from '../utils/session.js';
+import { getAuthUserId } from '../utils/session.js';
 import { uploadFile } from '../services/storageService.js';
 
 const router = express.Router();
@@ -47,19 +46,19 @@ const upload = multer({
 
 /**
  * Middleware to check and enforce token limits.
- * Allows anonymous generation in development, but blocks logged-in free users without tokens.
+ * Allows anonymous generation, but blocks logged-in free users without tokens.
  */
 async function checkTokenLimit(req, res, next) {
   try {
-    const spotifyUserId = getSpotifyUserId(req);
+    const userId = await getAuthUserId(req);
     
-    // If not logged in, we allow processing using backend client credentials for development preview
-    if (!spotifyUserId) {
+    // If not logged in, allow processing (anonymous users get blurred tracks in frontend)
+    if (!userId) {
       return next();
     }
 
     const user = await db.user.findUnique({
-      where: { spotify_id: spotifyUserId },
+      where: { id: userId },
       select: { tier: true, tokens: true }
     });
 
@@ -79,14 +78,6 @@ async function checkTokenLimit(req, res, next) {
     console.error("Error in checkTokenLimit middleware:", error);
     next(error);
   }
-}
-
-async function resolveSpotifyToken(req) {
-  const spotifyUserId = getSpotifyUserId(req);
-  if (spotifyUserId) {
-    return getValidUserToken(spotifyUserId);
-  }
-  return spotify.getClientCredentialsToken();
 }
 
 function filterUniqueTracks(tracks, excludeTracks = []) {
@@ -127,6 +118,7 @@ async function fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, ex
 /**
  * Route: POST /api/playlist/process
  * Accepts an image file, parses it via Gemini, fetches Spotify recommendations.
+ * Works for both authenticated and anonymous users.
  */
 router.post('/process', upload.single('image'), checkTokenLimit, async (req, res) => {
   if (!req.file) {
@@ -135,43 +127,40 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
 
   const filePath = req.file.path;
   const mimeType = req.file.mimetype;
-  const spotifyUserId = getSpotifyUserId(req);
+  const userId = await getAuthUserId(req);
 
   try {
     // 1. Ingestion: Read file buffer to send to Gemini
     const fileBuffer = await fs.promises.readFile(filePath);
 
-    // 2. Spotify Match Setup: Resolve Spotify Token first to query past playlists
-    let spotifyToken;
-    if (spotifyUserId) {
-      spotifyToken = await getValidUserToken(spotifyUserId);
-    } else {
-      // Anonymous dev preview uses Client Credentials
-      console.log("User not logged in, using client credentials token for recommendation preview.");
-      spotifyToken = await spotify.getClientCredentialsToken();
-    }
+    // 2. Spotify Match Setup: Always use Client Credentials for catalog searches
+    console.log("Using client credentials token for Spotify catalog search.");
+    const spotifyToken = await spotify.getClientCredentialsToken();
 
-    // Retrieve historical tracks to prevent repeat recommendations
+    // Retrieve historical tracks to prevent repeat recommendations (only for logged-in users)
     const excludedSongs = [];
-    if (spotifyUserId) {
+    if (userId) {
       try {
         const pastGenerations = await db.generation.findMany({
-          where: { user_id: spotifyUserId, NOT: { playlist_id: null } },
+          where: { user_id: userId, NOT: { playlist_id: null } },
           take: 3,
           orderBy: { created_at: 'desc' }
         });
         
         console.log(`Checking ${pastGenerations.length} past playlists for repeat recommendations...`);
-        const fetchPromises = pastGenerations.map(async (gen) => {
+        const results = [];
+        for (const gen of pastGenerations) {
           try {
-            return await spotify.getPlaylistTracks(spotifyToken, gen.playlist_id);
+            const tracks = await spotify.getPlaylistTracks(spotifyToken, gen.playlist_id);
+            if (tracks) {
+              results.push(tracks);
+            }
           } catch (err) {
             console.warn(`Failed to fetch tracks for past playlist ${gen.playlist_id}:`, err);
-            return [];
           }
-        });
-        
-        const results = await Promise.all(fetchPromises);
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
         for (const tracks of results) {
           for (const track of tracks) {
             if (track && track.name) {
@@ -199,18 +188,21 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
     const recommendedSongs = metadata.recommendedSongs || [];
     console.log(`AI recommended ${recommendedSongs.length} tracks - resolving on Spotify...`);
 
-    // Fetch details for each recommended track in parallel
-    const searchPromises = recommendedSongs.map(async (song) => {
+    // Fetch details for each recommended track sequentially with a 150ms sleep step to protect rate limits
+    const searchResults = [];
+    for (const song of recommendedSongs) {
       try {
-        return await spotify.searchTrackByDetails(spotifyToken, song.title, song.artist);
+        const track = await spotify.searchTrackByDetails(spotifyToken, song.title, song.artist);
+        if (track) {
+          searchResults.push(track);
+        }
       } catch (err) {
         console.warn(`Failed to resolve track "${song.title}" by "${song.artist}" on Spotify:`, err);
-        return null;
       }
-    });
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
 
-    const searchResults = await Promise.all(searchPromises);
-    let finalTracks = searchResults.filter(track => track !== null);
+    let finalTracks = searchResults;
 
     // Deduplicate final track list to guarantee 100% uniqueness by normalized title and artist
     // and filter out repeat recommendations from past playlists
@@ -238,12 +230,12 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
     let generationId = crypto.randomUUID();
 
     // 5. Token deduction and history logging (only if user is logged in)
-    if (spotifyUserId) {
+    if (userId) {
       // Deduct 1 token if user is on Free tier
-      const user = await db.user.findUnique({ where: { spotify_id: spotifyUserId } });
+      const user = await db.user.findUnique({ where: { id: userId } });
       if (user && user.tier === 'free') {
         await db.user.update({
-          where: { spotify_id: spotifyUserId },
+          where: { id: userId },
           data: { tokens: { decrement: 1 } }
         });
       }
@@ -252,7 +244,7 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
       await db.generation.create({
         data: {
           id: generationId,
-          user_id: spotifyUserId,
+          user_id: userId,
           image_path: webImagePath,
           dominant_colors: JSON.stringify(metadata.dominantColorPalette),
           environmental_context: metadata.environmentalContext,
@@ -265,11 +257,15 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
       });
     }
 
+    // Determine if user is authenticated to decide what track data to expose
+    const isAuthenticated = !!userId;
+
     res.json({
       success: true,
-      generationId: spotifyUserId ? generationId : null,
+      generationId: userId ? generationId : null,
       imagePath: webImagePath,
       metadata: metadata,
+      isAuthenticated: isAuthenticated,
       tracks: finalTracks,
       suggestedTracks: await fetchSupplementaryTracks(
         spotifyToken,
@@ -291,58 +287,34 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
 
 /**
  * Route: POST /api/playlist/save
- * Creates a playlist on the user's Spotify account and adds recommended tracks.
+ * Creates a PUBLIC playlist on the Master Spotify Account and returns the Spotify link.
+ * Users can then open the link and save it to their own library.
+ * Auth is optional — but if signed in, the generation is linked to their history.
  */
 router.post('/save', async (req, res) => {
-  const spotifyUserId = getSpotifyUserId(req);
-  const { playlistName, playlistDescription, isPublic, trackUris, generationId, coverImageBase64 } = req.body;
-
-  if (!spotifyUserId) {
-    return res.status(401).json({ success: false, message: "Please connect your Spotify account first." });
-  }
+  const { playlistName, playlistDescription, trackUris, generationId, coverImageBase64 } = req.body;
 
   if (!playlistName || !trackUris || !Array.isArray(trackUris) || trackUris.length === 0) {
     return res.status(400).json({ success: false, message: "Missing playlist name or track URIs." });
   }
 
   try {
-    let playlistId = "mock_playlist_123";
-    let playlistUrl = "https://open.spotify.com/playlist/mock_playlist_123";
+    // Create playlist on the Master Spotify Account
+    const desc = playlistDescription || "AI-generated playlist curated by MomentAI ✨";
+    const { playlistId, playlistUrl } = await spotify.createMasterPlaylist(
+      playlistName,
+      desc,
+      trackUris,
+      coverImageBase64 || null
+    );
 
-    if (process.env.NODE_ENV === 'test') {
-      console.log("[TEST] Mocking Spotify playlist creation, track adding, and cover upload...");
-    } else {
-      const token = await getValidUserToken(spotifyUserId);
-      
-      // Create playlist on user's account
-      console.log(`Creating playlist: "${playlistName}" for user: ${spotifyUserId}`);
-      const desc = playlistDescription || "AI-generated playlist curated by Playlist_pic.";
-      const createdPlaylist = await spotify.createPlaylist(spotifyUserId, token, playlistName, desc, isPublic !== false);
-      playlistId = createdPlaylist.id;
-      playlistUrl = createdPlaylist.external_urls.spotify;
-      
-      // Add tracks to playlist
-      console.log(`Adding ${trackUris.length} tracks to playlist: ${playlistId}`);
-      await spotify.addTracksToPlaylist(token, playlistId, trackUris);
-
-      // Upload custom cover art if provided
-      if (coverImageBase64) {
-        console.log(`Uploading custom cover art to playlist: ${playlistId}`);
-        try {
-          await spotify.uploadPlaylistCover(token, playlistId, coverImageBase64);
-        } catch (coverErr) {
-          console.error("Failed to upload custom cover art to Spotify:", coverErr);
-          // We log it but do not throw, so the user still gets their playlist saved
-        }
-      }
-    }
-
-    // Update generation database log with saved playlist metadata
-    if (generationId) {
+    // If user is authenticated, link the playlist to their generation history
+    const userId = await getAuthUserId(req);
+    if (userId && generationId) {
       await db.generation.updateMany({
         where: {
           id: generationId,
-          user_id: spotifyUserId
+          user_id: userId
         },
         data: {
           playlist_id: playlistId,
@@ -376,7 +348,7 @@ router.post('/suggest-more', async (req, res) => {
   }
 
   try {
-    const spotifyToken = await resolveSpotifyToken(req);
+    const spotifyToken = await spotify.getClientCredentialsToken();
     const excludeTracks = excludeTrackIds.map((id) => ({ id }));
     const tracks = await fetchSupplementaryTracks(
       spotifyToken,
@@ -397,14 +369,14 @@ router.post('/suggest-more', async (req, res) => {
  * Fetch past generated playlists for the logged in user
  */
 router.get('/history', async (req, res) => {
-  const spotifyUserId = getSpotifyUserId(req);
-  if (!spotifyUserId) {
+  const userId = await getAuthUserId(req);
+  if (!userId) {
     return res.status(401).json({ success: false, message: "Unauthorized" });
   }
 
   try {
     const history = await db.generation.findMany({
-      where: { user_id: spotifyUserId },
+      where: { user_id: userId },
       orderBy: { created_at: 'desc' }
     });
 
@@ -439,15 +411,8 @@ router.post('/import', async (req, res) => {
     return res.status(400).json({ success: false, message: "Invalid Spotify playlist URL format." });
   }
 
-  const spotifyUserId = getSpotifyUserId(req);
-
   try {
-    let token;
-    if (spotifyUserId) {
-      token = await getValidUserToken(spotifyUserId);
-    } else {
-      token = await spotify.getClientCredentialsToken();
-    }
+    const token = await spotify.getClientCredentialsToken();
 
     console.log(`Importing playlist details & tracks for: ${playlistId}`);
     const details = await spotify.getPlaylistDetails(token, playlistId);
