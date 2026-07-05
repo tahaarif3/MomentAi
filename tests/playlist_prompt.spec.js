@@ -39,7 +39,7 @@ test.describe('Playlist_pic Custom Prompt E2E Tests', () => {
     expect(envText).not.toBe('-');
 
     // 6. Verify tracklist contains recommendations
-    const trackCards = page.locator('.track-card');
+    const trackCards = page.locator('#tracklistContainer .track-card');
     const trackCount = await trackCards.count();
     console.log(`[TEST] Found ${trackCount} tracks with custom prompt: "${testStyle}"`);
     expect(trackCount).toBeGreaterThan(0);
@@ -77,7 +77,7 @@ test.describe('Playlist_pic Custom Prompt E2E Tests', () => {
     expect(envText).not.toBe('-');
 
     // 5. Verify tracklist contains recommendations (verifying optional behavior works)
-    const trackCards = page.locator('.track-card');
+    const trackCards = page.locator('#tracklistContainer .track-card');
     const trackCount = await trackCards.count();
     console.log(`[TEST] Found ${trackCount} tracks without custom prompt (pure visual mapping)`);
     expect(trackCount).toBeGreaterThan(0);

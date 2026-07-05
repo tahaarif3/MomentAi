@@ -99,7 +99,7 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await expect(playerContainer).toBeHidden();
 
     // 4. Click on the first track card to load player
-    const firstTrack = page.locator('.track-card').first();
+    const firstTrack = page.locator('#tracklistContainer .track-card').first();
     await expect(firstTrack).toBeVisible();
     
     // Get track ID from the card element
@@ -143,7 +143,7 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
 
     // 3. Verify recommended tracks are resolved on Spotify and rendered
-    const trackCards = page.locator('.track-card');
+    const trackCards = page.locator('#tracklistContainer .track-card');
     await expect(trackCards).toHaveCount(3); // 3 tracks from the AI mock
 
     const track1Text = await trackCards.nth(0).locator('.track-title').textContent();

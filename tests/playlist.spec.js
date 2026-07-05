@@ -8,7 +8,7 @@ test.describe('Playlist_pic Core Pipeline & Recommendation Matching', () => {
     await page.goto('/');
 
     // Check header and initial state
-    await expect(page.locator('.logo h1')).toContainText('Moment.AI');
+    await expect(page.locator('.logo h1')).toContainText('MomentAI');
     await expect(page.locator('.tracklist-placeholder')).toBeHidden();
 
     // Select and upload the sunny beach image
