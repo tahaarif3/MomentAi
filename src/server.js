@@ -52,15 +52,17 @@ if (process.env.NODE_ENV === 'test') {
 }
 
 // Middleware
-// CORS configuration to support native mobile apps (Capacitor)
+// CORS configuration to support native mobile apps (Capacitor) and production deploy URL
 app.use((req, res, next) => {
+  const appBaseUrl = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
   const allowedOrigins = [
     'http://localhost',
     'capacitor://localhost',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'https://momentai.dev',
-    'https://www.momentai.dev'
+    'https://www.momentai.dev',
+    ...(appBaseUrl ? [appBaseUrl] : [])
   ];
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -131,8 +133,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`===============================================`);
-  console.log(` Playlist_pic running at http://127.0.0.1:${PORT}`);
+  console.log(` Playlist_pic running on port ${PORT}`);
   console.log(`===============================================`);
 });

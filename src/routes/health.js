@@ -3,6 +3,10 @@ import prisma from '../config/db.js';
 
 const router = express.Router();
 
+router.get('/live', (req, res) => {
+  res.status(200).json({ status: 'UP' });
+});
+
 router.get('/', async (req, res) => {
   try {
     // Perform a fast raw query to check database connectivity
