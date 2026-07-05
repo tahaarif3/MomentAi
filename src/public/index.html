@@ -19,17 +19,21 @@
 
   <div class="app-container">
     <!-- Header -->
-    <header class="app-header glass-card">
+    <header class="app-header">
       <div class="logo">
-        <span class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="svg-icon logo-svg"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></span>
-        <h1>Moment<span>.AI</span></h1>
+        <h1>MomentAI</h1>
       </div>
+
+      <nav class="header-nav landing-only" aria-label="Primary">
+        <a href="#howItWorks" class="header-nav-link">How It Works</a>
+        <a href="#" class="header-nav-link">About</a>
+      </nav>
+
+      <button class="btn-text header-new-analysis preview-only hidden" id="btnResetImage" type="button">New Analysis</button>
       
       <div class="user-panel" id="userPanel">
         <!-- Will be dynamically populated by app.js -->
-        <button class="btn btn-primary btn-spotify-connect" id="btnConnectSpotify">
-          <span class="spotify-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="svg-icon"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.377-1.454-5.37-1.783-8.893-.978-.336.077-.67-.134-.747-.47-.077-.336.134-.67.47-.747 3.856-.882 7.15-.506 9.822 1.13.294.18.387.563.205.858zm1.224-2.723c-.226.367-.706.487-1.074.26-2.72-1.672-6.87-2.157-10.076-1.183-.412.125-.845-.108-.97-.52-.125-.413.108-.846.52-.97 3.667-1.11 8.243-.574 11.34 1.33.367.227.487.708.26 1.083zm.108-2.825C14.398 8.784 8.61 8.593 5.253 9.613c-.516.156-1.056-.134-1.213-.65a.94.94 0 0 1 .65-1.213c3.858-1.17 10.23-.953 14.28 1.45.464.275.615.875.34 1.34a.946.946 0 0 1-1.303.348z"/></svg></span> Connect Spotify
-        </button>
+        <button class="btn btn-spotify-connect" id="btnConnectSpotify" type="button">Connect</button>
       </div>
     </header>
 
@@ -38,138 +42,188 @@
       
       <!-- Left Column: Source Input and AI Analysis -->
       <section class="panel-column left-panel">
-        
-        <!-- Upload Card -->
-        <div class="glass-card upload-card" id="uploadCard">
-          <div class="card-header centered-header">
-            <h2>Turn Your Current Moment Into a Playlist.</h2>
-            <p>Upload a photo of your moment to instantly extract its aesthetic mood and generate a matching soundtrack.</p>
-          </div>
-          
-          <div class="drop-zone" id="dropZone">
-            <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" style="display: none;">
-            <div class="drop-zone-content" id="dropZoneContent">
-              <div class="upload-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon upload-svg"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></div>
-              <p class="drop-text-primary">Snap or Upload Your Moment</p>
-              <p class="drop-text-secondary">Drag & drop or click to browse</p>
-              <span class="supported-formats">JPEG, PNG, WebP (Max 10MB)</span>
+
+        <!-- Landing: separated hero, upload, and steps panels -->
+        <div class="landing-stack animate-panel is-visible" id="landingStack">
+          <div class="landing-layout">
+            <div class="glass-card landing-hero-card">
+              <div class="landing-hero">
+                <h2 class="hero-title">Remember the moment with a playlist</h2>
+                <p class="hero-subtitle">Snap or upload a photo to instantly analyze the mood and match it to a curated Spotify playlist.</p>
+                <button class="btn btn-purple btn-upload-trigger" id="btnUploadMoment" type="button">Upload Your Moment</button>
+                <div class="feature-pills">
+                  <span class="feature-pill">🎵 AI-Powered Analysis</span>
+                  <span class="feature-pill">🎨 Mood Detection</span>
+                  <span class="feature-pill">🔗 Spotify Integration</span>
+                </div>
+              </div>
             </div>
-            <img id="uploadPreview" class="upload-preview-img hidden" alt="Upload Preview">
+
+            <div class="glass-card landing-upload-card" id="uploadCard">
+              <div class="landing-drop-card">
+                <div class="drop-zone-outer">
+                  <div class="drop-zone" id="dropZone">
+                    <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                    <div class="drop-zone-content" id="dropZoneContent">
+                      <div class="upload-icon-circle">📷</div>
+                      <p class="drop-text-primary">Drag &amp; Drop or<br>Tap to Capture</p>
+                      <p class="drop-text-secondary">JPEG, PNG, WebP (Max 10MB)</p>
+                    </div>
+                    <img id="uploadPreview" class="upload-preview-img hidden" alt="Upload Preview">
+                  </div>
+                </div>
+
+                <div class="custom-prompt-container">
+                  <label for="customTextPrompt" class="prompt-label">Guide the style (Optional)</label>
+                  <input type="text" id="customTextPrompt" class="prompt-input" placeholder="e.g. synthwave, midnight lofi rock, nostalgic acoustics...">
+                </div>
+
+                <button class="btn btn-purple btn-generate btn-full hidden" id="btnGeneratePlaylist" type="button">
+                  Upload Your Moment
+                </button>
+              </div>
+            </div>
           </div>
 
-          <!-- Custom Music Prompt (Optional) -->
-          <div class="custom-prompt-container">
-            <label for="customTextPrompt" class="prompt-label">Guide the style (Optional)</label>
-            <input type="text" id="customTextPrompt" class="prompt-input" placeholder="e.g. synthwave, midnight lofi rock, nostalgic acoustics...">
-          </div>
-
-          <!-- Generate Action Button -->
-          <button class="btn btn-primary btn-generate btn-full hidden" id="btnGeneratePlaylist">
-            ⚡ Generate Vibe Playlist
-          </button>
+          <section class="glass-card how-it-works-card how-it-works" id="howItWorks">
+            <h3 class="how-it-works-title">How It Works</h3>
+            <div class="steps-grid">
+              <div class="step-card stagger-enter">
+                <span class="step-badge">1</span>
+                <div class="step-copy">
+                  <h4>1. Upload a Photo</h4>
+                  <p>Snap or choose any moment</p>
+                </div>
+              </div>
+              <div class="step-card stagger-enter">
+                <span class="step-badge">2</span>
+                <div class="step-copy">
+                  <h4>2. AI Analyzes Mood</h4>
+                  <p>Colors, context &amp; emotion detected</p>
+                </div>
+              </div>
+              <div class="step-card stagger-enter">
+                <span class="step-badge">3</span>
+                <div class="step-copy">
+                  <h4>3. Get Your Playlist</h4>
+                  <p>Curated tracks saved to Spotify</p>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
 
 
 
         <!-- Ingestion Preview & AI Extraction Summary -->
-        <div class="glass-card analysis-card hidden" id="analysisCard">
-          <div class="card-header">
-            <h2>Aesthetic Profile</h2>
-            <button class="btn-text" id="btnResetImage">← Snap New Moment</button>
-          </div>
-
-          <div class="visual-player-source">
-            <img id="sourceImagePreview" src="" alt="Uploaded source picture">
-            <div class="analysis-overlay hidden" id="analysisLoader">
-              <div class="scan-bar"></div>
-              <div class="spinner"></div>
-              <p>Analyzing visual energy...</p>
-            </div>
-          </div>
-
-          <!-- Structured Outputs -->
-          <div class="metadata-results" id="metadataResults">
-            <div class="vibe-group">
-              <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.03455 19.176 5.0991 19.434 5.0223 19.6708C4.85202 20.1961 4.75 20.7818 4.75 21.4C4.75 21.7314 5.01863 22 5.35 22H12Z"></path><circle cx="7.5" cy="10.5" r="1.5"></circle><circle cx="11.5" cy="7.5" r="1.5"></circle><circle cx="16.5" cy="9.5" r="1.5"></circle><circle cx="15.5" cy="14.5" r="1.5"></circle></svg> Color Palette</h3>
-              <div class="tag-container" id="colorTags"></div>
-            </div>
-
-            <div class="vibe-group">
-              <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg> Environment</h3>
-              <p class="vibe-text-val" id="envContext">-</p>
-            </div>
-
-            <div class="vibe-group">
-              <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg> Mood Profile</h3>
-              <p class="vibe-text-val" id="emotionalVibe">-</p>
-            </div>
-
-            <div class="vibe-group" style="display: none;">
-              <h3>⚡ Visual Energy Metrics</h3>
-              <div class="slider-group">
-                <div class="slider-item">
-                  <div class="slider-labels">
-                    <span>Valence (Bright Vibes)</span>
-                    <span id="valValence">0.50</span>
-                  </div>
-                  <div class="slider-track-fill">
-                    <div class="slider-fill-bar" id="barValence" style="width: 50%;"></div>
-                  </div>
-                </div>
-
-                <div class="slider-item">
-                  <div class="slider-labels">
-                    <span>Energy (Intensity)</span>
-                    <span id="valEnergy">0.50</span>
-                  </div>
-                  <div class="slider-track-fill">
-                    <div class="slider-fill-bar" id="barEnergy" style="width: 50%;"></div>
-                  </div>
-                </div>
-
-                <div class="slider-item">
-                  <div class="slider-labels">
-                    <span>Acousticness (Organic)</span>
-                    <span id="valAcousticness">0.50</span>
-                  </div>
-                  <div class="slider-track-fill">
-                    <div class="slider-fill-bar" id="barAcousticness" style="width: 50%;"></div>
-                  </div>
-                </div>
+        <div class="glass-card analysis-card animate-panel hidden" id="analysisCard">
+          <div class="card-section card-section--media">
+            <div class="visual-player-source">
+              <img id="sourceImagePreview" src="" alt="Uploaded source picture">
+              <div class="analysis-overlay hidden" id="analysisLoader">
+                <div class="scan-bar"></div>
+                <div class="spinner"></div>
+                <p>Analyzing visual energy...</p>
               </div>
             </div>
+          </div>
 
+          <hr class="section-divider" aria-hidden="true">
+
+          <div class="card-section card-section--meta aesthetic-preview">
+            <h2 class="aesthetic-title" id="aestheticTitle">Aesthetic: —</h2>
+            <div class="metric-row">
+              <span class="metric-pill" id="metricEnergy">⚡ —% Neon Energy</span>
+              <span class="metric-pill" id="metricMood">🌙 —% Midnight Mood</span>
+            </div>
+            <div class="palette-row">
+              <div class="color-swatches" id="colorSwatches"></div>
+              <span class="genres-inline" id="genresLabel">Genres: —</span>
+            </div>
+          </div>
+
+          <!-- Structured Outputs (kept for tests + screen readers) -->
+          <div class="metadata-results sr-only" id="metadataResults" aria-hidden="true">
             <div class="vibe-group">
-              <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3A3 3 0 0 0 18 3Z"></path><path d="M9 10a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-4Z"></path><path d="M15 7.5a1.5 1.5 0 0 0-3 0V15a3 3 0 0 0-3-3"></path></svg> Recommended Genres</h3>
+              <h3>Color Palette</h3>
+              <div class="tag-container" id="colorTags"></div>
+            </div>
+            <div class="vibe-group">
+              <h3>Environment</h3>
+              <p class="vibe-text-val" id="envContext">-</p>
+            </div>
+            <div class="vibe-group">
+              <h3>Mood Profile</h3>
+              <p class="vibe-text-val" id="emotionalVibe">-</p>
+            </div>
+            <div class="vibe-group">
+              <h3>Recommended Genres</h3>
               <div class="tag-container" id="genreTags"></div>
+            </div>
+            <div class="vibe-group">
+              <div class="slider-group">
+                <div class="slider-item">
+                  <span id="valValence">0.50</span>
+                  <div class="slider-track-fill"><div class="slider-fill-bar" id="barValence" style="width: 50%;"></div></div>
+                </div>
+                <div class="slider-item">
+                  <span id="valEnergy">0.50</span>
+                  <div class="slider-track-fill"><div class="slider-fill-bar" id="barEnergy" style="width: 50%;"></div></div>
+                </div>
+                <div class="slider-item">
+                  <span id="valAcousticness">0.50</span>
+                  <div class="slider-track-fill"><div class="slider-fill-bar" id="barAcousticness" style="width: 50%;"></div></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       <!-- Right Column: Curated Playlist Player -->
-      <section class="panel-column right-panel">
+      <section class="panel-column right-panel animate-panel">
         <div class="glass-card playlist-card">
-          <div class="card-header playlist-header-actions">
-            <div>
-              <h2>Curated Tracklist</h2>
-              <p id="playlistStatusText">Your moment's personalized soundtrack</p>
-            </div>
-            <div class="playlist-ctas">
-              <button class="btn btn-success hidden" id="btnSavePlaylist">
-                Save to Spotify
-              </button>
+          <div class="card-section card-section--header">
+            <div class="card-header playlist-header-actions">
+              <div>
+                <h2>Your Playlist</h2>
+                <p id="playlistStatusText">Upload a moment photo to generate tracks instantly.</p>
+              </div>
             </div>
           </div>
 
-          <!-- Playback Widget -->
-          <div class="spotify-embed-container hidden" id="spotifyPlayerContainer"></div>
+          <hr class="section-divider" aria-hidden="true">
 
-          <!-- Track List -->
-          <div class="tracklist-container" id="tracklistContainer">
-            <div class="tracklist-placeholder">
-              <div class="placeholder-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></div>
-              <p>Upload a moment photo to generate tracks instantly.</p>
+          <div class="card-section card-section--player">
+            <div class="spotify-embed-container animate-panel hidden" id="spotifyPlayerContainer"></div>
+          </div>
+
+          <div class="card-section card-section--tracks playlist-editor">
+            <div class="playlist-tracks-panel">
+              <p class="playlist-section-label">Your playlist</p>
+              <div class="tracklist-container" id="tracklistContainer">
+                <div class="tracklist-placeholder">
+                  <div class="placeholder-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></div>
+                  <p>Upload a moment photo to generate tracks instantly.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="suggestions-panel hidden" id="suggestionsPanel">
+              <div class="suggestions-header">
+                <p class="playlist-section-label">Add more songs</p>
+                <button type="button" class="btn-text btn-load-more hidden" id="btnLoadMoreSuggestions">Load more</button>
+              </div>
+              <div class="suggestions-list" id="suggestionsList"></div>
+            </div>
+          </div>
+
+          <hr class="section-divider section-divider--actions" aria-hidden="true">
+
+          <div class="card-section card-section--actions">
+            <div class="playlist-ctas preview-ctas">
+              <button class="btn btn-success hidden" id="btnSavePlaylist" type="button">Save to Spotify</button>
+              <button class="btn btn-secondary hidden" id="btnNewPhoto" type="button">New Photo</button>
             </div>
           </div>
         </div>
@@ -177,7 +231,7 @@
     </main>
 
     <!-- Token Purchase Modal -->
-    <div class="modal-backdrop hidden" id="tokenModal">
+    <div class="modal-backdrop animate-modal hidden" id="tokenModal">
       <div class="modal-content glass-card">
         <button class="modal-close" id="btnTokenClose">&times;</button>
         <h2>Upgrade your Moment.AI experience</h2>
@@ -216,22 +270,23 @@
     </div>
 
     <!-- Value Gate: Spotify Auth Card Modal -->
-    <div class="modal-backdrop hidden" id="spotifyAuthGateModal">
+    <div class="modal-backdrop animate-modal auth-gate-backdrop hidden" id="spotifyAuthGateModal">
       <div class="modal-content glass-card auth-gate-modal-content">
-        <button class="modal-close" id="btnAuthGateClose">&times;</button>
+        <button class="modal-close" id="btnAuthGateClose" type="button">&times;</button>
         <div class="spotify-badge-large">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="svg-icon spotify-logo-svg"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.377-1.454-5.37-1.783-8.893-.978-.336.077-.67-.134-.747-.47-.077-.336.134-.67.47-.747 3.856-.882 7.15-.506 9.822 1.13.294.18.387.563.205.858zm1.224-2.723c-.226.367-.706.487-1.074.26-2.72-1.672-6.87-2.157-10.076-1.183-.412.125-.845-.108-.97-.52-.125-.413.108-.846.52-.97 3.667-1.11 8.243-.574 11.34 1.33.367.227.487.708.26 1.083zm.108-2.825C14.398 8.784 8.61 8.593 5.253 9.613c-.516.156-1.056-.134-1.213-.65a.94.94 0 0 1 .65-1.213c3.858-1.17 10.23-.953 14.28 1.45.464.275.615.875.34 1.34a.946.946 0 0 1-1.303.348z"/></svg>
         </div>
-        <h2>Unlock Your Spotify Playlist</h2>
-        <p class="modal-subtitle">Connect your Spotify account to save this curated tracklist directly to your library and sync with your players.</p>
-        <button class="btn btn-primary btn-spotify-connect btn-full" id="btnConnectSpotifyGate">
-          Connect Spotify
+        <h2>Save to your Spotify library</h2>
+        <p class="modal-subtitle">We'll create this playlist directly in your Spotify account so you can listen anywhere, anytime.</p>
+        <button class="btn btn-spotify-connect btn-full" id="btnConnectSpotifyGate" type="button">
+          Connect with Spotify
         </button>
+        <p class="auth-privacy-note">We only request the permissions needed to create playlists</p>
       </div>
     </div>
 
     <!-- Save Playlist Modal -->
-    <div class="modal-backdrop hidden" id="savePlaylistModal">
+    <div class="modal-backdrop animate-modal hidden" id="savePlaylistModal">
       <div class="modal-content glass-card save-modal-content">
         <button class="modal-close" id="btnSavePlaylistClose">&times;</button>
         <h2>Save Playlist to Spotify</h2>
@@ -280,7 +335,7 @@
     </div>
 
     <!-- Export Success Modal -->
-    <div class="modal-backdrop hidden" id="successModal">
+    <div class="modal-backdrop animate-modal hidden" id="successModal">
       <div class="modal-content glass-card success-modal-content">
         <button class="modal-close" id="btnSuccessClose">&times;</button>
         <div class="success-icon-badge">✓</div>
@@ -296,6 +351,6 @@
   </div>
 
   <!-- Client-side Script -->
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
