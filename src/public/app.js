@@ -1,4 +1,15 @@
 // Base API URL configuration
+import {
+  hidePanel,
+  runViewTransition,
+  setButtonLoading,
+  showPanel,
+  staggerIn,
+  toggleModal,
+  transitionToLanding,
+  transitionToPreview
+} from './animations.js';
+
 // If running in Capacitor (protocol is capacitor: or hostname is localhost with no port),
 // point to the hosted backend. Otherwise, use relative paths.
 const API_BASE = (
@@ -25,7 +36,9 @@ let currentGeneration = {
   id: null,
   imagePath: null,
   metadata: null,
-  tracks: []
+  tracks: [],
+  suggestedTracks: [],
+  customPrompt: ''
 };
 
 let activeTrack = null;
@@ -37,6 +50,7 @@ let currentAudioVolume = 0.5;
 const userPanel = document.getElementById('userPanel');
 const btnConnectSpotify = document.getElementById('btnConnectSpotify');
 const uploadCard = document.getElementById('uploadCard');
+const landingStack = document.getElementById('landingStack');
 const analysisCard = document.getElementById('analysisCard');
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
@@ -64,6 +78,9 @@ const barAcousticness = document.getElementById('barAcousticness');
 
 // Playlist elements
 const tracklistContainer = document.getElementById('tracklistContainer');
+const suggestionsPanel = document.getElementById('suggestionsPanel');
+const suggestionsList = document.getElementById('suggestionsList');
+const btnLoadMoreSuggestions = document.getElementById('btnLoadMoreSuggestions');
 const playlistStatusText = document.getElementById('playlistStatusText');
 const btnSavePlaylist = document.getElementById('btnSavePlaylist');
 const spotifyPlayerContainer = document.getElementById('spotifyPlayerContainer');
@@ -91,6 +108,34 @@ const tokenModal = document.getElementById('tokenModal');
 const btnTokenClose = document.getElementById('btnTokenClose');
 const btnBuyTokens = document.getElementById('btnBuyTokens');
 const btnBuyPremium = document.getElementById('btnBuyPremium');
+const spotifyAuthGateModal = document.getElementById('spotifyAuthGateModal');
+const btnUploadMoment = document.getElementById('btnUploadMoment');
+const btnNewPhoto = document.getElementById('btnNewPhoto');
+const aestheticTitle = document.getElementById('aestheticTitle');
+const metricEnergy = document.getElementById('metricEnergy');
+const metricMood = document.getElementById('metricMood');
+const colorSwatches = document.getElementById('colorSwatches');
+const genresLabel = document.getElementById('genresLabel');
+
+function updateChromeState(isPreview) {
+  document.querySelectorAll('.landing-only').forEach((el) => {
+    el.classList.toggle('hidden', isPreview);
+  });
+  document.querySelectorAll('.preview-only').forEach((el) => {
+    el.classList.toggle('hidden', !isPreview);
+  });
+  document.body.classList.toggle('is-preview', isPreview);
+}
+
+function showPreviewCtas() {
+  if (btnSavePlaylist) btnSavePlaylist.classList.remove('hidden');
+  if (btnNewPhoto) btnNewPhoto.classList.remove('hidden');
+}
+
+function hidePreviewCtas() {
+  if (btnSavePlaylist) btnSavePlaylist.classList.add('hidden');
+  if (btnNewPhoto) btnNewPhoto.classList.add('hidden');
+}
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
@@ -98,11 +143,18 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
   setupDeepLinkListener();
   
-  // Set initial landing state
   const grid = document.querySelector('.dashboard-grid');
   if (grid) {
     grid.classList.add('landing-state');
   }
+
+  const rightPanel = document.querySelector('.right-panel');
+  if (rightPanel) {
+    rightPanel.classList.remove('is-visible');
+  }
+
+  updateChromeState(false);
+  staggerIn(document.querySelector('.steps-grid'), '.step-card', 80);
 });
 
 // Setup event listeners
@@ -121,13 +173,25 @@ function setupEventListeners() {
   dropZone.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', handleFileSelect);
 
+  if (btnUploadMoment) {
+    btnUploadMoment.addEventListener('click', () => fileInput.click());
+  }
+
+  if (btnNewPhoto) {
+    btnNewPhoto.addEventListener('click', () => resetUploader());
+  }
+
   dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
-    dropZone.classList.add('dragover');
+    if (!dropZone.classList.contains('dragover')) {
+      dropZone.classList.add('dragover');
+    }
   });
 
-  dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('dragover');
+  dropZone.addEventListener('dragleave', (e) => {
+    if (!dropZone.contains(e.relatedTarget)) {
+      dropZone.classList.remove('dragover');
+    }
   });
 
   dropZone.addEventListener('drop', (e) => {
@@ -143,30 +207,41 @@ function setupEventListeners() {
 
   // Generate Playlist click handler
   if (btnGeneratePlaylist) {
-    btnGeneratePlaylist.addEventListener('click', () => {
+    btnGeneratePlaylist.addEventListener('click', async () => {
       if (stagedFile) {
-        // Set preview image for analysis card
         sourceImagePreview.src = uploadPreview.src;
 
-        // Toggle card screens
-        uploadCard.classList.add('hidden');
-        analysisCard.classList.remove('hidden');
-        analysisLoader.classList.remove('hidden');
-        
         const grid = document.querySelector('.dashboard-grid');
-        if (grid) {
-          grid.classList.remove('landing-state');
-          grid.classList.add('preview-state');
-        }
+        setButtonLoading(btnGeneratePlaylist, true);
 
-        // Trigger processing
-        uploadAndProcessImage(stagedFile);
+        await transitionToPreview({
+          grid,
+          landingStack,
+          analysisCard,
+          analysisLoader,
+          showLoader: true
+        });
+        updateChromeState(true);
+
+        await uploadAndProcessImage(stagedFile);
       }
     });
   }
 
   // Save Playlist
   btnSavePlaylist.addEventListener('click', savePlaylistToSpotify);
+
+  if (tracklistContainer) {
+    tracklistContainer.addEventListener('click', handlePlaylistTrackClick);
+  }
+
+  if (suggestionsList) {
+    suggestionsList.addEventListener('click', handleSuggestionTrackClick);
+  }
+
+  if (btnLoadMoreSuggestions) {
+    btnLoadMoreSuggestions.addEventListener('click', loadMoreSuggestions);
+  }
 
   // Import Playlist click handler
   if (btnImportPlaylist) {
@@ -175,10 +250,10 @@ function setupEventListeners() {
 
   // Save Modal events
   if (btnSavePlaylistClose) {
-    btnSavePlaylistClose.addEventListener('click', () => savePlaylistModal.classList.add('hidden'));
+    btnSavePlaylistClose.addEventListener('click', () => toggleModal(savePlaylistModal, false));
   }
   if (btnCancelSave) {
-    btnCancelSave.addEventListener('click', () => savePlaylistModal.classList.add('hidden'));
+    btnCancelSave.addEventListener('click', () => toggleModal(savePlaylistModal, false));
   }
   if (btnConfirmSave) {
     btnConfirmSave.addEventListener('click', confirmSavePlaylistToSpotify);
@@ -186,22 +261,18 @@ function setupEventListeners() {
 
   // Success Modal events
   if (btnSuccessClose) {
-    btnSuccessClose.addEventListener('click', () => successModal.classList.add('hidden'));
+    btnSuccessClose.addEventListener('click', () => toggleModal(successModal, false));
   }
   if (btnSuccessCloseAction) {
-    btnSuccessCloseAction.addEventListener('click', () => successModal.classList.add('hidden'));
+    btnSuccessCloseAction.addEventListener('click', () => toggleModal(successModal, false));
   }
   
-  // Auth Gate Modal events
   const btnAuthGateClose = document.getElementById('btnAuthGateClose');
   if (btnAuthGateClose) {
-    btnAuthGateClose.addEventListener('click', () => document.getElementById('spotifyAuthGateModal').classList.add('hidden'));
+    btnAuthGateClose.addEventListener('click', () => toggleModal(spotifyAuthGateModal, false));
   }
 
-
-
-  // Token Modal
-  btnTokenClose.addEventListener('click', () => tokenModal.classList.add('hidden'));
+  btnTokenClose.addEventListener('click', () => toggleModal(tokenModal, false));
   btnBuyTokens.addEventListener('click', purchaseTokens);
   btnBuyPremium.addEventListener('click', upgradePremium);
 }
@@ -251,7 +322,7 @@ function renderUserPanel() {
   
   const showBilling = document.getElementById('btnShowBilling');
   if (showBilling) {
-    showBilling.addEventListener('click', () => tokenModal.classList.remove('hidden'));
+    showBilling.addEventListener('click', () => toggleModal(tokenModal, true));
   }
   
   updatePlaylistBlurState();
@@ -259,9 +330,7 @@ function renderUserPanel() {
 
 function renderDisconnectedPanel() {
   userPanel.innerHTML = `
-    <button class="btn btn-primary" id="btnConnectSpotify">
-      🟢 Connect Spotify
-    </button>
+    <button class="btn btn-spotify-connect" id="btnConnectSpotify" type="button">Connect</button>
   `;
   document.getElementById('btnConnectSpotify').addEventListener('click', connectSpotify);
   
@@ -288,7 +357,7 @@ async function logout() {
     authState.loggedIn = false;
     authState.user = null;
     renderDisconnectedPanel();
-    btnSavePlaylist.classList.add('hidden');
+    hidePreviewCtas();
     // Reload page to reset states
     window.location.reload();
   } catch (error) {
@@ -327,7 +396,7 @@ function processSelectedFile(file) {
 }
 
 // Reset Image Upload
-function resetUploader() {
+async function resetUploader() {
   fileInput.value = '';
   stagedFile = null;
   sourceImagePreview.src = '';
@@ -366,16 +435,15 @@ function resetUploader() {
     importUrlInput.value = '';
   }
 
-  analysisCard.classList.add('hidden');
-  uploadCard.classList.remove('hidden');
-  
   const grid = document.querySelector('.dashboard-grid');
-  if (grid) {
-    grid.classList.add('landing-state');
-    grid.classList.remove('preview-state');
-  }
-  
+  await transitionToLanding({
+    grid,
+    landingStack,
+    analysisCard,
+    analysisLoader
+  });
 
+  setButtonLoading(btnGeneratePlaylist, false);
   
   // Reset tracklist
   tracklistContainer.innerHTML = `
@@ -385,10 +453,10 @@ function resetUploader() {
     </div>
   `;
   playlistStatusText.textContent = "Upload an image to generate recommended tracks";
-  btnSavePlaylist.classList.add('hidden');
+  hidePreviewCtas();
   
   if (spotifyPlayerContainer) {
-    spotifyPlayerContainer.classList.add('hidden');
+    hidePanel(spotifyPlayerContainer);
     spotifyPlayerContainer.innerHTML = '';
   }
   activeTrack = null;
@@ -397,8 +465,14 @@ function resetUploader() {
     id: null,
     imagePath: null,
     metadata: null,
-    tracks: []
+    tracks: [],
+    suggestedTracks: [],
+    customPrompt: ''
   };
+
+  if (suggestionsPanel) suggestionsPanel.classList.add('hidden');
+  if (suggestionsList) suggestionsList.innerHTML = '';
+  if (btnLoadMoreSuggestions) btnLoadMoreSuggestions.classList.add('hidden');
 }
 
 // Import Existing Spotify Playlist by URL/URI
@@ -434,20 +508,21 @@ async function importPlaylistFromUrl() {
     currentGeneration.imagePath = null;
     currentGeneration.metadata = result.metadata;
     currentGeneration.tracks = result.tracks;
+    currentGeneration.suggestedTracks = result.suggestedTracks || [];
 
-    // Transition UI views
-    uploadCard.classList.add('hidden');
+    const grid = document.querySelector('.dashboard-grid');
+    await transitionToPreview({
+      grid,
+      landingStack,
+      analysisCard,
+      analysisLoader,
+      showLoader: false
+    });
+
     if (importCard) {
       importCard.classList.add('hidden');
     }
-    analysisCard.classList.remove('hidden');
-    analysisLoader.classList.add('hidden'); // Bypass vision scan animations
-    
-    const grid = document.querySelector('.dashboard-grid');
-    if (grid) {
-      grid.classList.remove('landing-state');
-      grid.classList.add('preview-state');
-    }
+    updateChromeState(true);
 
     if (result.coverUrl) {
       sourceImagePreview.src = result.coverUrl;
@@ -457,11 +532,11 @@ async function importPlaylistFromUrl() {
 
     // Render results
     renderAnalysisResults(result.metadata);
-    renderTracks(result.tracks);
+    refreshPlaylistEditor();
 
     // Show save option if user is logged in
     if (authState.loggedIn) {
-      btnSavePlaylist.classList.remove('hidden');
+      showPreviewCtas();
       btnSavePlaylist.textContent = "Clone Playlist to Spotify";
       btnSavePlaylist.disabled = false;
     } else {
@@ -496,8 +571,7 @@ async function uploadAndProcessImage(file) {
     if (!res.ok) {
       const errData = await res.json();
       if (res.status === 403) {
-        // Token limit hit
-        tokenModal.classList.remove('hidden');
+        await toggleModal(tokenModal, true);
       }
       throw new Error(errData.message || "Failed to process image.");
     }
@@ -507,6 +581,8 @@ async function uploadAndProcessImage(file) {
     currentGeneration.imagePath = result.imagePath;
     currentGeneration.metadata = result.metadata;
     currentGeneration.tracks = result.tracks;
+    currentGeneration.suggestedTracks = result.suggestedTracks || [];
+    currentGeneration.customPrompt = customPromptInput?.value.trim() || '';
 
     // Refresh user tokens if logged in
     if (authState.loggedIn) {
@@ -515,10 +591,10 @@ async function uploadAndProcessImage(file) {
 
     // Render results
     renderAnalysisResults(result.metadata);
-    renderTracks(result.tracks);
+    refreshPlaylistEditor();
 
     // Always show Save to Spotify and Share Vibe buttons to trigger inverted onboarding auth gate
-    btnSavePlaylist.classList.remove('hidden');
+    showPreviewCtas();
     btnSavePlaylist.textContent = "Save Playlist to Spotify";
     btnSavePlaylist.disabled = false;
     
@@ -531,115 +607,348 @@ async function uploadAndProcessImage(file) {
   } catch (error) {
     console.error("Pipeline failure:", error);
     alert(error.message);
-    resetUploader();
+    await resetUploader();
   } finally {
     analysisLoader.classList.add('hidden');
+    setButtonLoading(btnGeneratePlaylist, false);
   }
 }
 
 // Render Gemini visual metadata outputs
 function renderAnalysisResults(metadata) {
-  // Dominant colors
+  const vibeLabel = metadata.emotionalVibe
+    ? metadata.emotionalVibe.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    : 'Visual Vibe';
+
+  if (aestheticTitle) {
+    aestheticTitle.textContent = `Aesthetic: ${vibeLabel}`;
+  }
+  if (metricEnergy) {
+    metricEnergy.textContent = `⚡ ${Math.round(metadata.energy * 100)}% Neon Energy`;
+  }
+  if (metricMood) {
+    metricMood.textContent = `🌙 ${Math.round((1 - metadata.valence) * 100)}% Midnight Mood`;
+  }
+  if (genresLabel) {
+    genresLabel.textContent = `Genres: ${metadata.seedGenres.join(', ')}`;
+  }
+
+  if (colorSwatches) {
+    colorSwatches.innerHTML = '';
+    metadata.dominantColorPalette.slice(0, 4).forEach((color, i) => {
+      const swatch = document.createElement('span');
+      swatch.className = 'color-swatch';
+      swatch.style.backgroundColor = getTagColorHex(color);
+      swatch.style.setProperty('--stagger-delay', `${i * 60}ms`);
+      colorSwatches.appendChild(swatch);
+    });
+  }
+
   colorTags.innerHTML = '';
   metadata.dominantColorPalette.forEach(color => {
     const tag = document.createElement('span');
-    tag.className = 'tag color-tag';
-    // Style left border color based on typical aesthetic keywords or basic matching
+    tag.className = 'tag color-tag stagger-enter';
     tag.style.borderLeftColor = getTagColorHex(color);
     tag.textContent = color;
     colorTags.appendChild(tag);
   });
 
-  // Environmental and Emotional context
   envContext.textContent = metadata.environmentalContext;
   emotionalVibe.textContent = metadata.emotionalVibe;
 
-  // Sliders
   valValence.textContent = metadata.valence.toFixed(2);
-  barValence.style.width = `${metadata.valence * 100}%`;
-  
+  barValence.style.width = '0%';
   valEnergy.textContent = metadata.energy.toFixed(2);
-  barEnergy.style.width = `${metadata.energy * 100}%`;
-
+  barEnergy.style.width = '0%';
   valAcousticness.textContent = metadata.acousticness.toFixed(2);
-  barAcousticness.style.width = `${metadata.acousticness * 100}%`;
+  barAcousticness.style.width = '0%';
 
-  // Seed genres
+  requestAnimationFrame(() => {
+    barValence.style.width = `${metadata.valence * 100}%`;
+    barEnergy.style.width = `${metadata.energy * 100}%`;
+    barAcousticness.style.width = `${metadata.acousticness * 100}%`;
+  });
+
   genreTags.innerHTML = '';
   metadata.seedGenres.forEach(genre => {
     const tag = document.createElement('span');
-    tag.className = 'tag genre-tag';
+    tag.className = 'tag genre-tag stagger-enter';
     tag.textContent = genre;
     genreTags.appendChild(tag);
   });
+
+  if (aestheticTitle) {
+    aestheticTitle.classList.add('stagger-enter');
+    requestAnimationFrame(() => aestheticTitle.classList.add('stagger-visible'));
+  }
+  staggerIn(document.querySelector('.metric-row'), '.metric-pill', 50);
 }
 
 // Helper to determine border accent based on color string
 function getTagColorHex(colorName) {
   const cn = colorName.toLowerCase();
-  if (cn.includes('blue') || cn.includes('neon')) return '#00f2fe';
-  if (cn.includes('purple') || cn.includes('cyber')) return '#9b51e0';
-  if (cn.includes('pink') || cn.includes('pastel')) return '#ff758c';
-  if (cn.includes('red') || cn.includes('vintage')) return '#ff4b4b';
-  if (cn.includes('yellow') || cn.includes('warm')) return '#fbc2eb';
+  if (cn.includes('blue') || cn.includes('neon') || cn.includes('electric')) return '#4361ee';
+  if (cn.includes('purple') || cn.includes('cyber') || cn.includes('magenta')) return '#7209b7';
+  if (cn.includes('pink') || cn.includes('pastel') || cn.includes('glow')) return '#f72585';
+  if (cn.includes('cyan') || cn.includes('turquoise') || cn.includes('ocean')) return '#4cc9f0';
+  if (cn.includes('gold') || cn.includes('yellow') || cn.includes('warm') || cn.includes('sunny')) return '#fbc02d';
   if (cn.includes('green') || cn.includes('nature')) return '#1db954';
-  if (cn.includes('monochrome') || cn.includes('dark')) return '#8e95b2';
-  return '#ffffff';
+  if (cn.includes('red') || cn.includes('vintage')) return '#ff4b4b';
+  if (cn.includes('monochrome') || cn.includes('dark') || cn.includes('black')) return '#8e8e9f';
+  return '#4361ee';
 }
 
-// Render Track recommendations list
-function renderTracks(tracks) {
-  tracklistContainer.innerHTML = '';
-  updatePlaylistBlurState();
-  
-  if (tracks.length === 0) {
-    tracklistContainer.innerHTML = `
-      <div class="tracklist-placeholder">
-        <p>No recommendations found for this aesthetic setup.</p>
-      </div>
-    `;
-    playlistStatusText.textContent = "Try uploading a different image.";
-    return;
+function getTrackCoverUrl(track) {
+  const images = track.album?.images;
+  if (!images?.length) return null;
+  return images[images.length - 1]?.url || images[0]?.url || null;
+}
+
+function buildTrackCoverMarkup(track) {
+  const coverUrl = getTrackCoverUrl(track);
+  if (!coverUrl) {
+    return '<div class="track-cover track-cover--fallback" aria-hidden="true"></div>';
   }
 
-  playlistStatusText.textContent = `Aesthetic mapping resolved ${tracks.length} songs`;
+  return `<img class="track-cover" src="${escapeHtml(coverUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'track-cover track-cover--fallback'}))">`;
+}
 
-  tracks.forEach((track, index) => {
-    const trackCard = document.createElement('div');
-    trackCard.className = 'track-card';
-    trackCard.id = `track-${track.id}`;
+function buildTrackCardMarkup(track, index, mode) {
+  const artists = track.artists.map((artist) => artist.name).join(', ');
+  const duration = formatDuration(track.duration_ms);
+  const actionButton = mode === 'playlist'
+    ? `<button type="button" class="btn-track-action btn-remove-track" data-track-id="${escapeHtml(track.id)}" title="Remove from playlist" aria-label="Remove ${escapeHtml(track.name)} from playlist">×</button>`
+    : `<button type="button" class="btn-track-action btn-add-track" data-track-id="${escapeHtml(track.id)}" title="Add to playlist" aria-label="Add ${escapeHtml(track.name)} to playlist">+</button>`;
 
-    const coverUrl = track.album.images && track.album.images.length > 2 
-      ? track.album.images[2].url 
-      : 'https://via.placeholder.com/48';
-
-    const artists = track.artists.map(a => a.name).join(', ');
-    const duration = formatDuration(track.duration_ms);
-
-    trackCard.innerHTML = `
-      <div class="track-main-info" onclick="togglePlayTrack('${track.id}')">
+  return `
+    <div class="track-card stagger-enter" id="track-${track.id}" data-track-id="${escapeHtml(track.id)}">
+      <div class="track-main-info">
         <span class="track-index">${index + 1}</span>
-        <img class="track-cover" src="${coverUrl}" alt="Album Cover">
+        ${buildTrackCoverMarkup(track)}
         <div class="track-text">
           <h4 class="track-title">${escapeHtml(track.name)}</h4>
           <p class="track-artist">${escapeHtml(artists)}</p>
         </div>
         <span class="track-album">${escapeHtml(track.album.name)}</span>
       </div>
-      
       <div class="track-controls">
         <span class="track-duration">${duration}</span>
-        <button class="btn-play-preview" onclick="togglePlayTrack('${track.id}')" title="Play on Spotify">▶</button>
+        <button type="button" class="btn-play-preview" data-track-id="${escapeHtml(track.id)}" title="Play on Spotify">▶</button>
+        ${actionButton}
+      </div>
+    </div>
+  `;
+}
+
+function getExcludedTrackIds() {
+  return [
+    ...currentGeneration.tracks,
+    ...currentGeneration.suggestedTracks
+  ].map((track) => track.id);
+}
+
+function updatePlaylistStatusText() {
+  const playlistCount = currentGeneration.tracks.length;
+  const suggestionCount = currentGeneration.suggestedTracks.length;
+
+  if (playlistCount === 0) {
+    playlistStatusText.textContent = suggestionCount > 0
+      ? 'Add songs from the suggestions below'
+      : 'Try uploading a different image.';
+    return;
+  }
+
+  playlistStatusText.textContent = `${playlistCount} track${playlistCount === 1 ? '' : 's'} in your playlist`;
+}
+
+function refreshPlaylistEditor() {
+  renderPlaylistTracks(currentGeneration.tracks);
+  renderSuggestedTracks(currentGeneration.suggestedTracks);
+  updatePlaylistStatusText();
+
+  if (btnSavePlaylist) {
+    btnSavePlaylist.disabled = currentGeneration.tracks.length === 0;
+  }
+
+  if (btnLoadMoreSuggestions) {
+    btnLoadMoreSuggestions.classList.toggle('hidden', !currentGeneration.metadata);
+  }
+}
+
+function renderPlaylistTracks(tracks) {
+  tracklistContainer.innerHTML = '';
+  updatePlaylistBlurState();
+
+  if (tracks.length === 0) {
+    tracklistContainer.innerHTML = `
+      <div class="tracklist-placeholder tracklist-placeholder--compact">
+        <p>No songs in your playlist yet. Add tracks from the suggestions below.</p>
       </div>
     `;
+    showPreviewCtas();
+    updateChromeState(true);
+    return;
+  }
 
-    tracklistContainer.appendChild(trackCard);
+  tracks.forEach((track, index) => {
+    tracklistContainer.insertAdjacentHTML('beforeend', buildTrackCardMarkup(track, index, 'playlist'));
   });
+
+  staggerIn(tracklistContainer, '.track-card', 40);
+  showPreviewCtas();
+  updateChromeState(true);
+}
+
+function renderSuggestedTracks(tracks) {
+  if (!suggestionsPanel || !suggestionsList) return;
+
+  if (!currentGeneration.metadata) {
+    suggestionsPanel.classList.add('hidden');
+    suggestionsList.innerHTML = '';
+    return;
+  }
+
+  suggestionsPanel.classList.remove('hidden');
+  suggestionsList.innerHTML = '';
+
+  if (tracks.length === 0) {
+    suggestionsList.innerHTML = `
+      <p class="suggestions-empty">No extra recommendations right now. Load more to discover similar tracks.</p>
+    `;
+    return;
+  }
+
+  tracks.forEach((track, index) => {
+    suggestionsList.insertAdjacentHTML('beforeend', buildTrackCardMarkup(track, index, 'suggestion'));
+  });
+
+  staggerIn(suggestionsList, '.track-card', 40);
+}
+
+function handlePlaylistTrackClick(event) {
+  const removeButton = event.target.closest('.btn-remove-track');
+  if (removeButton) {
+    event.stopPropagation();
+    removeTrackFromPlaylist(removeButton.dataset.trackId);
+    return;
+  }
+
+  const playButton = event.target.closest('.btn-play-preview');
+  const mainInfo = event.target.closest('.track-main-info');
+  if (playButton || mainInfo) {
+    const card = event.target.closest('.track-card');
+    if (card?.dataset.trackId) {
+      togglePlayTrack(card.dataset.trackId);
+    }
+  }
+}
+
+function handleSuggestionTrackClick(event) {
+  const addButton = event.target.closest('.btn-add-track');
+  if (addButton) {
+    event.stopPropagation();
+    addTrackToPlaylist(addButton.dataset.trackId);
+    return;
+  }
+
+  const playButton = event.target.closest('.btn-play-preview');
+  const mainInfo = event.target.closest('.track-main-info');
+  if (playButton || mainInfo) {
+    const card = event.target.closest('.track-card');
+    if (card?.dataset.trackId) {
+      togglePlayTrack(card.dataset.trackId, true);
+    }
+  }
+}
+
+function removeTrackFromPlaylist(trackId) {
+  const trackIndex = currentGeneration.tracks.findIndex((track) => track.id === trackId);
+  if (trackIndex === -1) return;
+
+  const [removedTrack] = currentGeneration.tracks.splice(trackIndex, 1);
+
+  if (activeTrack === trackId) {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+    activeTrack = null;
+    hidePanel(spotifyPlayerContainer);
+    spotifyPlayerContainer.innerHTML = '';
+  }
+
+  if (!currentGeneration.suggestedTracks.some((track) => track.id === removedTrack.id)) {
+    currentGeneration.suggestedTracks.unshift(removedTrack);
+  }
+
+  refreshPlaylistEditor();
+}
+
+function addTrackToPlaylist(trackId) {
+  if (currentGeneration.tracks.some((track) => track.id === trackId)) return;
+
+  const suggestionIndex = currentGeneration.suggestedTracks.findIndex((track) => track.id === trackId);
+  if (suggestionIndex === -1) return;
+
+  const [track] = currentGeneration.suggestedTracks.splice(suggestionIndex, 1);
+  currentGeneration.tracks.push(track);
+  refreshPlaylistEditor();
+}
+
+async function loadMoreSuggestions() {
+  if (!currentGeneration.metadata || !btnLoadMoreSuggestions) return;
+
+  setButtonLoading(btnLoadMoreSuggestions, true, true);
+
+  try {
+    const res = await apiFetch('/api/playlist/suggest-more', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        metadata: currentGeneration.metadata,
+        excludeTrackIds: getExcludedTrackIds(),
+        customPrompt: currentGeneration.customPrompt
+      })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.message || 'Failed to load more suggestions.');
+    }
+
+    const result = await res.json();
+    const incoming = result.tracks || [];
+    const existingIds = new Set(getExcludedTrackIds());
+
+    incoming.forEach((track) => {
+      if (track?.id && !existingIds.has(track.id)) {
+        currentGeneration.suggestedTracks.push(track);
+        existingIds.add(track.id);
+      }
+    });
+
+    refreshPlaylistEditor();
+  } catch (error) {
+    console.error('Failed to load more suggestions:', error);
+    alert(error.message);
+  } finally {
+    setButtonLoading(btnLoadMoreSuggestions, false);
+  }
+}
+
+// Render Track recommendations list (legacy entry point)
+function renderTracks(tracks) {
+  currentGeneration.tracks = tracks || [];
+  refreshPlaylistEditor();
 }
 
 // Toggle Play track via Spotify Embed / Native Audio
-window.togglePlayTrack = function(trackId) {
-  const track = currentGeneration.tracks.find(t => t.id === trackId);
+window.togglePlayTrack = function(trackId, searchSuggestions = false) {
+  const trackLists = searchSuggestions
+    ? [currentGeneration.suggestedTracks, currentGeneration.tracks]
+    : [currentGeneration.tracks, currentGeneration.suggestedTracks];
+  const track = trackLists[0].find((item) => item.id === trackId)
+    || trackLists[1].find((item) => item.id === trackId);
   if (!track) return;
 
   const card = document.getElementById(`track-${trackId}`);
@@ -651,8 +960,8 @@ window.togglePlayTrack = function(trackId) {
   }
 
   if (activeTrack === trackId) {
-    card.classList.remove('active');
-    spotifyPlayerContainer.classList.add('hidden');
+    if (card) card.classList.remove('active');
+    hidePanel(spotifyPlayerContainer);
     spotifyPlayerContainer.innerHTML = '';
     activeTrack = null;
   } else {
@@ -665,7 +974,7 @@ window.togglePlayTrack = function(trackId) {
     }
 
     // Play new visually
-    card.classList.add('active');
+    if (card) card.classList.add('active');
     activeTrack = trackId;
 
     if (track.preview_url) {
@@ -678,7 +987,7 @@ window.togglePlayTrack = function(trackId) {
 
       currentAudio.onended = () => {
         card.classList.remove('active');
-        spotifyPlayerContainer.classList.add('hidden');
+        hidePanel(spotifyPlayerContainer);
         spotifyPlayerContainer.innerHTML = '';
         activeTrack = null;
       };
@@ -723,7 +1032,7 @@ window.togglePlayTrack = function(trackId) {
         </div>
       `;
     }
-    spotifyPlayerContainer.classList.remove('hidden');
+    showPanel(spotifyPlayerContainer);
   }
 };
 
@@ -732,8 +1041,7 @@ async function savePlaylistToSpotify() {
   if (!currentGeneration.tracks.length) return;
 
   if (!authState.loggedIn) {
-    // Inverted Onboarding Trigger: Open Spotify Auth Gate Modal instead of configuration form
-    document.getElementById('spotifyAuthGateModal').classList.remove('hidden');
+    await toggleModal(spotifyAuthGateModal, true);
     return;
   }
 
@@ -748,7 +1056,7 @@ async function savePlaylistToSpotify() {
   modalUploadCover.checked = true;
 
   // Open modal
-  savePlaylistModal.classList.remove('hidden');
+  await toggleModal(savePlaylistModal, true);
 }
 
 // Client-side canvas-resizing logic to convert image to 500x500 square JPEG under 256KB
@@ -791,7 +1099,7 @@ function getResizedCoverArtBase64(file) {
 function showExportSuccessModal(playlistName, url) {
   successModalText.textContent = `Playlist "${playlistName}" was created successfully on your Spotify account!`;
   linkOpenSpotify.href = url;
-  successModal.classList.remove('hidden');
+  toggleModal(successModal, true);
 }
 
 // Confirm Save Playlist to Spotify Account
@@ -807,10 +1115,10 @@ async function confirmSavePlaylistToSpotify() {
   }
 
   // Close Save Modal first
-  savePlaylistModal.classList.add('hidden');
+  await toggleModal(savePlaylistModal, false);
 
-  btnSavePlaylist.disabled = true;
-  btnSavePlaylist.textContent = "Saving to Spotify...";
+  setButtonLoading(btnSavePlaylist, true);
+  btnSavePlaylist.dataset.originalText = 'Save Playlist to Spotify';
 
   const trackUris = currentGeneration.tracks.map(t => t.uri);
   
@@ -849,13 +1157,15 @@ async function confirmSavePlaylistToSpotify() {
 
     btnSavePlaylist.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><polyline points="20 6 9 17 4 12"></polyline></svg> Saved`;
     btnSavePlaylist.className = 'btn btn-secondary';
+    btnSavePlaylist.classList.remove('is-loading');
+    btnSavePlaylist.disabled = false;
     
     showExportSuccessModal(playlistName, data.playlistUrl);
 
   } catch (error) {
     console.error("Save failed:", error);
     alert(error.message);
-    btnSavePlaylist.disabled = false;
+    setButtonLoading(btnSavePlaylist, false);
     btnSavePlaylist.textContent = "Save Playlist to Spotify";
   }
 }
@@ -871,8 +1181,8 @@ async function purchaseTokens() {
     
     if (res.ok) {
       alert(data.message);
-      tokenModal.classList.add('hidden');
-      checkAuth(); // update badges
+      await toggleModal(tokenModal, false);
+      checkAuth();
     } else {
       throw new Error(data.message);
     }
@@ -895,8 +1205,8 @@ async function upgradePremium() {
     
     if (res.ok) {
       alert(data.message);
-      tokenModal.classList.add('hidden');
-      checkAuth(); // update badges
+      await toggleModal(tokenModal, false);
+      checkAuth();
     } else {
       throw new Error(data.message);
     }

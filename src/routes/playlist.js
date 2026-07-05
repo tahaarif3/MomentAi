@@ -80,6 +80,49 @@ async function checkTokenLimit(req, res, next) {
   }
 }
 
+async function resolveSpotifyToken(req) {
+  const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+  if (spotifyUserId) {
+    return getValidUserToken(spotifyUserId);
+  }
+  return spotify.getClientCredentialsToken();
+}
+
+function filterUniqueTracks(tracks, excludeTracks = []) {
+  const excludeIds = new Set(excludeTracks.map((track) => track.id).filter(Boolean));
+  const seen = new Set();
+
+  return tracks.filter((track) => {
+    if (!track?.id || excludeIds.has(track.id)) return false;
+
+    const cleanTitle = track.name.toLowerCase().replace(/\s*[\(\[-].*$/g, '').trim();
+    const artistName = track.artists?.[0]?.name?.toLowerCase() || '';
+    const key = `${cleanTitle} - ${artistName}`;
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, excludeTracks = []) {
+  try {
+    const pool = await spotify.getRecommendations(
+      spotifyToken,
+      metadata.seedGenres,
+      metadata.valence,
+      metadata.energy,
+      metadata.acousticness,
+      customPrompt,
+      metadata.emotionalVibe
+    );
+    return filterUniqueTracks(pool, excludeTracks);
+  } catch (err) {
+    console.warn('Failed to fetch supplementary track suggestions:', err);
+    return [];
+  }
+}
+
 /**
  * Route: POST /api/playlist/process
  * Accepts an image file, parses it via Gemini, fetches Spotify recommendations.
@@ -226,7 +269,13 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
       generationId: spotifyUserId ? generationId : null,
       imagePath: webImagePath,
       metadata: metadata,
-      tracks: finalTracks
+      tracks: finalTracks,
+      suggestedTracks: await fetchSupplementaryTracks(
+        spotifyToken,
+        metadata,
+        customPrompt,
+        finalTracks
+      )
     });
 
   } catch (error) {
@@ -315,6 +364,34 @@ router.post('/save', async (req, res) => {
 });
 
 /**
+ * Route: POST /api/playlist/suggest-more
+ * Returns additional Spotify track suggestions based on existing analysis metadata.
+ */
+router.post('/suggest-more', async (req, res) => {
+  const { metadata, excludeTrackIds = [], customPrompt = '' } = req.body;
+
+  if (!metadata?.seedGenres) {
+    return res.status(400).json({ success: false, message: 'Missing playlist metadata.' });
+  }
+
+  try {
+    const spotifyToken = await resolveSpotifyToken(req);
+    const excludeTracks = excludeTrackIds.map((id) => ({ id }));
+    const tracks = await fetchSupplementaryTracks(
+      spotifyToken,
+      metadata,
+      customPrompt,
+      excludeTracks
+    );
+
+    res.json({ success: true, tracks });
+  } catch (error) {
+    console.error('Error fetching more suggestions:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
  * Route: GET /api/playlist/history
  * Fetch past generated playlists for the logged in user
  */
@@ -390,6 +467,7 @@ router.post('/import', async (req, res) => {
       success: true,
       metadata: metadata,
       tracks: tracks,
+      suggestedTracks: [],
       coverUrl: details.images && details.images.length > 0 ? details.images[0].url : null
     });
   } catch (error) {
