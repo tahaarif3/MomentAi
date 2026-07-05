@@ -1,0 +1,28 @@
+{
+  "name": "playlist-pic",
+  "version": "1.0.0",
+  "description": "Visual playlist generator mapping image aesthetics to Spotify tracks",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "@google/genai": "*",
+    "@aws-sdk/client-s3": "^3.500.0",
+    "@prisma/client": "^5.10.0",
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.1.5",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "nodemon": "^3.1.0",
+    "prisma": "^5.10.0"
+  }
+}

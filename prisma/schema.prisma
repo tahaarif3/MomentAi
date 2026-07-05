@@ -1,0 +1,43 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  spotify_id               String       @id
+  display_name             String?
+  email                    String?
+  spotify_access_token     String?
+  spotify_refresh_token    String?
+  spotify_token_expires_at BigInt?       // Stored as millisecond timestamp
+  tier                     String       @default("free")
+  tokens                   Int          @default(3)
+  created_at               DateTime     @default(now())
+  generations              Generation[]
+
+  @@map("users")
+}
+
+model Generation {
+  id                    String   @id
+  user_id               String?
+  image_path            String
+  dominant_colors       String   // Store JSON array as string
+  environmental_context String?
+  emotional_vibe        String?
+  seed_genres           String   // Store JSON array as string
+  valence               Float
+  energy                Float
+  acousticness          Float
+  playlist_id           String?
+  playlist_name         String?
+  playlist_url          String?
+  created_at            DateTime @default(now())
+  user                  User?    @relation(fields: [user_id], references: [spotify_id], onDelete: Cascade)
+
+  @@map("generations")
+}
