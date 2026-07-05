@@ -10,11 +10,13 @@ Optimized for **Nikita Bier's 3-second time-to-value rule**, it uses an inverted
 
 *   **Visual Mood Analysis**: Ingests images and uses **Gemini 2.5 Flash** to extract environmental context, emotional vibes, dominant color palettes, and seed genres.
 *   **Dynamic Spotify Search Engine**: Custom-tailored recommendations that combine parsed seed genres, custom user prompt directives, and visual emotional vibes with randomized offsets to generate fresh, unique tracklists.
-*   **Instagram Story Share Card**: A client-side HTML5 Canvas generator that creates a premium `9:16` (1080x1920) shareable graphic containing the source image, parsed color palettes, custom vibe badges, and a referral link.
+*   **Interactive Playlist Editor**: Add or remove tracks from the generated playlist, browse supplementary suggestions, and load more recommendations on demand via `/api/playlist/suggest-more`.
+*   **Desktop Landing Layout**: Full-width hero card with side-by-side upload and analysis preview, animated view transitions, and a dedicated preview chrome state.
 *   **Inverted Onboarding Flow**: Zero upfront login walls. Users upload a picture and see their aesthetic profile immediately. Spotify Authentication is requested only when they click "Save to Spotify".
 *   **Native Previews with Volume Control**: Direct audio preview of tracks using native HTML5 audio controls with interactive volume sliders.
 *   **Premium Visual Value Gate**: Blurs recommendations and displays a glassmorphic lockout overlay if the user is unauthenticated or has reached their free daily token generation limit.
-*   **Security-First Architecture**: 100% parameter-parameter database queries (Prisma), signed cryptographic cookies, and safe CORS isolation policies.
+*   **Duplicate-Free Recommendations**: Double-deduplication filters repeat tracks within a playlist and across prior generations for the same user.
+*   **Security-First Architecture**: 100% parameterized database queries (Prisma), signed cryptographic cookies, and safe CORS isolation policies.
 
 ---
 
@@ -85,6 +87,22 @@ npx playwright install
 # Run the test suite
 npx playwright test
 ```
+
+---
+
+## 📋 Changelog
+
+| Commit | Summary |
+|--------|---------|
+| `cda80a0` | Add desktop layout Playwright tests; scope track card selectors to `#tracklistContainer` |
+| `fb27368` | Interactive playlist editor — add/remove tracks, supplementary suggestions, `POST /api/playlist/suggest-more` |
+| `858e9c3` | Redesign desktop landing layout with hero cards, preview chrome, and responsive styling |
+| `f50661d` | Add `animations.js` module for panel, modal, and view transition helpers |
+| `3674719` | Implement double-deduplication to prevent repeat recommendations within and across playlists |
+| `8ee9f75` | Remove vibe card sharing and canvas download features |
+| `3f3fbf1` | Fix Vibe Card download CORS failure and add test mock fallback |
+| `c83ef6c` | Add README documenting project setup, features, and tech stack |
+| `d3a4681` | Initial clean launch commit |
 
 ---
 
