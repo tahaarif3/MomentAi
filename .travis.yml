@@ -1,0 +1,16 @@
+language: node_js
+node_js:
+  - "18"
+  - "20"
+
+cache:
+  directories:
+    - ~/.npm
+    - ~/.cache/ms-playwright
+
+install:
+  - npm ci
+  - npx playwright install --with-deps chromium
+
+script:
+  - npx playwright test

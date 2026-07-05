@@ -12,7 +12,8 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'cmd /c "set NODE_ENV=test&& node src/server.js"',
+    command: 'node src/server.js',
+    env: { NODE_ENV: 'test' },
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: false,
     stdout: 'pipe',
