@@ -142,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
   setupEventListeners();
   setupDeepLinkListener();
+  handlePaymentReturn();
   
   const grid = document.querySelector('.dashboard-grid');
   if (grid) {
@@ -314,7 +315,7 @@ function renderUserPanel() {
         <button class="btn-text" id="btnLogout">Disconnect</button>
       </div>
     </div>
-    ${user.tier === 'free' ? '<button class="btn btn-secondary" id="btnShowBilling">Upgrade</button>' : ''}
+    ${user.tier === 'free' ? '<button class="btn btn-secondary" id="btnShowBilling">Upgrade</button>' : '<button class="btn btn-secondary" id="btnManageBilling">Manage subscription</button>'}
   `;
 
   // Attach logout event
@@ -323,6 +324,11 @@ function renderUserPanel() {
   const showBilling = document.getElementById('btnShowBilling');
   if (showBilling) {
     showBilling.addEventListener('click', () => toggleModal(tokenModal, true));
+  }
+
+  const manageBilling = document.getElementById('btnManageBilling');
+  if (manageBilling) {
+    manageBilling.addEventListener('click', openBillingPortal);
   }
   
   updatePlaylistBlurState();
@@ -1170,52 +1176,118 @@ async function confirmSavePlaylistToSpotify() {
   }
 }
 
-// Purchase Mock Tokens
+// Purchase tokens via Stripe Checkout
 async function purchaseTokens() {
   btnBuyTokens.disabled = true;
-  btnBuyTokens.textContent = "Processing...";
+  btnBuyTokens.textContent = 'Redirecting...';
 
   try {
-    const res = await apiFetch('/api/payment/purchase-tokens', { method: 'POST' });
+    const res = await apiFetch('/api/payment/create-checkout-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purchaseType: 'token_pack' })
+    });
     const data = await res.json();
-    
-    if (res.ok) {
-      alert(data.message);
-      await toggleModal(tokenModal, false);
-      checkAuth();
-    } else {
-      throw new Error(data.message);
+
+    if (res.ok && data.url) {
+      window.location.href = data.url;
+      return;
     }
+
+    if (res.status === 503) {
+      const fallback = await apiFetch('/api/payment/purchase-tokens', { method: 'POST' });
+      const fallbackData = await fallback.json();
+      if (fallback.ok) {
+        alert(fallbackData.message);
+        await toggleModal(tokenModal, false);
+        checkAuth();
+        return;
+      }
+      throw new Error(fallbackData.message);
+    }
+
+    throw new Error(data.message || 'Unable to start checkout.');
   } catch (error) {
     alert(error.message);
   } finally {
     btnBuyTokens.disabled = false;
-    btnBuyTokens.textContent = "Purchase Pack";
+    btnBuyTokens.textContent = 'Purchase Pack';
   }
 }
 
-// Upgrade Premium Mock
+// Upgrade to Premium via Stripe Checkout
 async function upgradePremium() {
   btnBuyPremium.disabled = true;
-  btnBuyPremium.textContent = "Processing...";
+  btnBuyPremium.textContent = 'Redirecting...';
 
   try {
-    const res = await apiFetch('/api/payment/subscribe', { method: 'POST' });
+    const res = await apiFetch('/api/payment/create-checkout-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purchaseType: 'premium' })
+    });
     const data = await res.json();
-    
-    if (res.ok) {
-      alert(data.message);
-      await toggleModal(tokenModal, false);
-      checkAuth();
-    } else {
-      throw new Error(data.message);
+
+    if (res.ok && data.url) {
+      window.location.href = data.url;
+      return;
     }
+
+    if (res.status === 503) {
+      const fallback = await apiFetch('/api/payment/subscribe', { method: 'POST' });
+      const fallbackData = await fallback.json();
+      if (fallback.ok) {
+        alert(fallbackData.message);
+        await toggleModal(tokenModal, false);
+        checkAuth();
+        return;
+      }
+      throw new Error(fallbackData.message);
+    }
+
+    throw new Error(data.message || 'Unable to start checkout.');
   } catch (error) {
     alert(error.message);
   } finally {
     btnBuyPremium.disabled = false;
-    btnBuyPremium.textContent = "Upgrade to Premium";
+    btnBuyPremium.textContent = 'Upgrade to Premium';
   }
+}
+
+async function openBillingPortal() {
+  try {
+    const res = await apiFetch('/api/payment/create-portal-session', { method: 'POST' });
+    const data = await res.json();
+
+    if (res.ok && data.url) {
+      window.location.href = data.url;
+      return;
+    }
+
+    throw new Error(data.message || 'Unable to open billing portal.');
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function handlePaymentReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const paymentStatus = params.get('payment');
+
+  if (!paymentStatus) return;
+
+  if (paymentStatus === 'success') {
+    alert('Payment received! Your account will update in a moment.');
+    checkAuth();
+  } else if (paymentStatus === 'cancelled') {
+    alert('Checkout was cancelled. No charge was made.');
+  }
+
+  params.delete('payment');
+  params.delete('session_id');
+  const nextQuery = params.toString();
+  const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash}`;
+  window.history.replaceState({}, document.title, nextUrl);
 }
 
 // Helper Utilities

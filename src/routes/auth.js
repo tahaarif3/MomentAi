@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import db from '../config/db.js';
 import * as spotify from '../clients/spotifyClient.js';
+import { getSpotifyUserId } from '../utils/session.js';
 
 const router = express.Router();
 
@@ -156,7 +157,7 @@ router.get('/logout', (req, res) => {
 
 // Returns current user profile details
 router.get('/me', async (req, res) => {
-  const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+  const spotifyUserId = getSpotifyUserId(req);
   if (!spotifyUserId) {
     return res.status(401).json({ loggedIn: false, message: "Not logged in" });
   }

@@ -1,6 +1,7 @@
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -16,10 +17,19 @@ model User {
   spotify_token_expires_at BigInt?       // Stored as millisecond timestamp
   tier                     String       @default("free")
   tokens                   Int          @default(3)
+  stripe_customer_id       String?      @unique
+  stripe_subscription_id   String?
   created_at               DateTime     @default(now())
   generations              Generation[]
 
   @@map("users")
+}
+
+model StripeEvent {
+  event_id   String   @id
+  created_at DateTime @default(now())
+
+  @@map("stripe_events")
 }
 
 model Generation {

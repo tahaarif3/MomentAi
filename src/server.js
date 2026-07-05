@@ -9,7 +9,7 @@ import rateLimit from 'express-rate-limit';
 // Routes
 import authRouter from './routes/auth.js';
 import playlistRouter from './routes/playlist.js';
-import paymentRouter from './routes/payment.js';
+import paymentRouter, { handleStripeWebhook } from './routes/payment.js';
 import healthRouter from './routes/health.js';
 
 // Setup __dirname for ES Modules
@@ -58,7 +58,9 @@ app.use((req, res, next) => {
     'http://localhost',
     'capacitor://localhost',
     'http://localhost:3000',
-    'http://127.0.0.1:3000'
+    'http://127.0.0.1:3000',
+    'https://momentai.dev',
+    'https://www.momentai.dev'
   ];
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -73,6 +75,9 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Stripe webhooks require the raw request body for signature verification.
+app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

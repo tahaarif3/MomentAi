@@ -1,6 +1,8 @@
 # Stage 1: Build dependencies and generate Prisma Client
 FROM node:20-alpine AS builder
 
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
 # Copy package configuration files
@@ -17,6 +19,8 @@ RUN npx prisma generate
 
 # Stage 2: Final lightweight runner
 FROM node:20-alpine AS runner
+
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 

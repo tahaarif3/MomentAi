@@ -7,6 +7,7 @@ import db from '../config/db.js';
 import { parsePlaylistImage } from '../services/geminiService.js';
 import * as spotify from '../clients/spotifyClient.js';
 import { getValidUserToken } from './auth.js';
+import { getSpotifyUserId } from '../utils/session.js';
 import { uploadFile } from '../services/storageService.js';
 
 const router = express.Router();
@@ -50,7 +51,7 @@ const upload = multer({
  */
 async function checkTokenLimit(req, res, next) {
   try {
-    const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+    const spotifyUserId = getSpotifyUserId(req);
     
     // If not logged in, we allow processing using backend client credentials for development preview
     if (!spotifyUserId) {
@@ -81,7 +82,7 @@ async function checkTokenLimit(req, res, next) {
 }
 
 async function resolveSpotifyToken(req) {
-  const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+  const spotifyUserId = getSpotifyUserId(req);
   if (spotifyUserId) {
     return getValidUserToken(spotifyUserId);
   }
@@ -134,7 +135,7 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
 
   const filePath = req.file.path;
   const mimeType = req.file.mimetype;
-  const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+  const spotifyUserId = getSpotifyUserId(req);
 
   try {
     // 1. Ingestion: Read file buffer to send to Gemini
@@ -293,7 +294,7 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
  * Creates a playlist on the user's Spotify account and adds recommended tracks.
  */
 router.post('/save', async (req, res) => {
-  const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+  const spotifyUserId = getSpotifyUserId(req);
   const { playlistName, playlistDescription, isPublic, trackUris, generationId, coverImageBase64 } = req.body;
 
   if (!spotifyUserId) {
@@ -396,7 +397,7 @@ router.post('/suggest-more', async (req, res) => {
  * Fetch past generated playlists for the logged in user
  */
 router.get('/history', async (req, res) => {
-  const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+  const spotifyUserId = getSpotifyUserId(req);
   if (!spotifyUserId) {
     return res.status(401).json({ success: false, message: "Unauthorized" });
   }
@@ -438,7 +439,7 @@ router.post('/import', async (req, res) => {
     return res.status(400).json({ success: false, message: "Invalid Spotify playlist URL format." });
   }
 
-  const spotifyUserId = req.signedCookies['spotify_user_id'] || req.cookies['spotify_user_id'];
+  const spotifyUserId = getSpotifyUserId(req);
 
   try {
     let token;
