@@ -126,7 +126,7 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await expect(playerContainer).toBeHidden();
   });
 
-  test('should detect visible artist and interleave with custom prompt tracks 50/50', async ({ page }) => {
+  test('should detect visible artist and resolve recommended tracks', async ({ page }) => {
     // 1. Navigate to dashboard
     await page.goto(targetUrl);
 
@@ -142,27 +142,16 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await generateBtn.click();
     await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
 
-    // 3. Verify artist top tracks (Pool A) and search tracks (Pool B) are present
-    // According to our mock:
-    // Pool A (Billie Eilish): "Mock Song 1 by Billie Eilish", "Mock Song 2 by Billie Eilish"
-    // Pool B (search for "artist-mode"): "Mock Search Song 1 for "artist-mode"", etc.
-    // They are interleaved 50/50:
-    // Track 1: Pool A Track 1 ("Mock Song 1 by Billie Eilish")
-    // Track 2: Pool B Track 1 ("Mock Search Song 1 for \"artist-mode\"")
-    // Track 3: Pool A Track 2 ("Mock Song 2 by Billie Eilish")
-    // Track 4: Pool B Track 2 ("Mock Search Song 2 for \"artist-mode\"")
-
+    // 3. Verify recommended tracks are resolved on Spotify and rendered
     const trackCards = page.locator('.track-card');
-    await expect(trackCards).toHaveCount(4); // 2 artist + 2 search tracks interleaved
+    await expect(trackCards).toHaveCount(3); // 3 tracks from the AI mock
 
     const track1Text = await trackCards.nth(0).locator('.track-title').textContent();
     const track2Text = await trackCards.nth(1).locator('.track-title').textContent();
     const track3Text = await trackCards.nth(2).locator('.track-title').textContent();
-    const track4Text = await trackCards.nth(3).locator('.track-title').textContent();
 
-    expect(track1Text).toContain('Mock Song 1 by Billie Eilish');
-    expect(track2Text).toContain('Mock Search Song 1 for "artist-mode"');
-    expect(track3Text).toContain('Mock Song 2 by Billie Eilish');
-    expect(track4Text).toContain('Mock Search Song 2 for "artist-mode"');
+    expect(track1Text).toContain('Ocean Eyes');
+    expect(track2Text).toContain('Bad Guy');
+    expect(track3Text).toContain('Bury a Friend');
   });
 });

@@ -31,7 +31,7 @@ const SPOTIFY_VALID_GENRES = [
  * @param {string} mimeType - The mime type of the image (e.g. image/jpeg, image/png)
  * @returns {Promise<object>} Parsed JSON metadata
  */
-export async function parsePlaylistImage(imageBuffer, mimeType, customPrompt = '', originalFilename = '') {
+export async function parsePlaylistImage(imageBuffer, mimeType, customPrompt = '', originalFilename = '', excludeSongs = []) {
   if (process.env.NODE_ENV === 'test') {
     console.log("Mocking Gemini analysis response in test environment...");
     
@@ -45,7 +45,12 @@ export async function parsePlaylistImage(imageBuffer, mimeType, customPrompt = '
         valence: 0.35,
         energy: 0.40,
         acousticness: 0.50,
-        detectedArtist: "Billie Eilish"
+        detectedArtist: "Billie Eilish",
+        recommendedSongs: [
+          { title: "Ocean Eyes", artist: "Billie Eilish" },
+          { title: "Bad Guy", artist: "Billie Eilish" },
+          { title: "Bury a Friend", artist: "Billie Eilish" }
+        ]
       };
     }
 
@@ -59,7 +64,11 @@ export async function parsePlaylistImage(imageBuffer, mimeType, customPrompt = '
         valence: 0.85,
         energy: 0.45,
         acousticness: 0.65,
-        detectedArtist: ""
+        detectedArtist: "",
+        recommendedSongs: [
+          { title: "Calm Down", artist: "Rema" },
+          { title: "Summer", artist: "Calvin Harris" }
+        ]
       };
     }
     return {
@@ -70,7 +79,11 @@ export async function parsePlaylistImage(imageBuffer, mimeType, customPrompt = '
       valence: 0.4,
       energy: 0.85,
       acousticness: 0.05,
-      detectedArtist: ""
+      detectedArtist: "",
+      recommendedSongs: [
+        { title: "Enter Sandman", artist: "Metallica" },
+        { title: "Master of Puppets", artist: "Metallica" }
+      ]
     };
   }
 
@@ -89,15 +102,25 @@ Choose 3 seed genres that represent this image. Crucially, the 3 seed genres MUS
 Map the image vibe to Spotify's numerical audio features:
 - Valence (0.0 to 1.0): Represents musical positivity (sad/dark/angry is closer to 0.0, happy/cheerful/bright is closer to 1.0).
 - Energy (0.0 to 1.0): Represents intensity, speed, and activity.
-- Acousticness (0.0 to 1.0): Confidence score of whether the music is acoustic/organic vs. electronic/synthesized.`;
+- Acousticness (0.0 to 1.0): Confidence score of whether the music is acoustic/organic vs. electronic/synthesized.
+
+CRITICAL DIRECTIVE: Recommend exactly 15 to 20 specific, real-world songs that perfectly match the visual context and overall mood of the image.
+- By default, recommendations MUST be popular English-language songs.
+- You must ONLY recommend cultural, regional, or foreign-language songs (e.g., Bollywood, Punjabi, Latin pop, Japanese city pop) if the image itself is explicitly identified as depicting a specific cultural setting or event (e.g., a Desi/Indian wedding, a traditional cultural festival, etc.). Otherwise, keep it fully in English.
+- Return these recommended tracks in the 'recommendedSongs' property.`;
 
   if (customPrompt && customPrompt.trim()) {
-    prompt += `\n\nCRITICAL DIRECTIVE: The user has requested to steer the music selection using the following styling guideline or genre request: "${customPrompt.trim()}". Adjust the selected seed genres (still choosing from the allowed list), valence, energy, and acousticness values to align the visual context with this specific musical style/genre request.`;
+    prompt += `\n\nCRITICAL DIRECTIVE: The user has requested to steer the music selection using the following styling guideline or genre request: "${customPrompt.trim()}". Adjust your direct song recommendations ('recommendedSongs'), seed genres (still choosing from the allowed list), valence, energy, and acousticness values to align the visual context with this specific musical style/genre request.`;
   }
 
   if (originalFilename && originalFilename.trim()) {
     const cleanFilename = originalFilename.split('.').slice(0, -1).join('.').replace(/[-_]/g, ' ');
-    prompt += `\n\nCRITICAL CONTEXT: The uploaded file was named "${originalFilename}" (analyzed as: "${cleanFilename}"). This filename often contains explicit details or hints about the event, genre, or mood (e.g., "edm-concert" implies electronic/dance/house music, "rainy-day-drive" implies chill/lofi, "desi-wedding" implies Bollywood/Indian wedding music). Incorporate these explicit clues from the filename into your selection of seed genres, valence, energy, and acousticness values to align the music recommendations precisely with the user's intended mood or theme.`;
+    prompt += `\n\nCRITICAL CONTEXT: The uploaded file was named "${originalFilename}" (analyzed as: "${cleanFilename}"). This filename often contains explicit details or hints about the event, genre, or mood (e.g., "edm-concert" implies electronic/dance/house music, "rainy-day-drive" implies chill/lofi, "desi-wedding" implies Bollywood/Indian wedding music). Incorporate these explicit clues from the filename into your selection of song recommendations, seed genres, valence, energy, and acousticness values to align the music recommendations precisely with the user's intended mood or theme.`;
+  }
+
+  if (excludeSongs && excludeSongs.length > 0) {
+    prompt += `\n\nCRITICAL DIRECTIVE: AVOID recommending any of the following songs because they are repeat recommendations from the user's previous playlists. You must choose different songs:
+- ${excludeSongs.join('\n- ')}`;
   }
 
   try {
@@ -150,6 +173,18 @@ Map the image vibe to Spotify's numerical audio features:
             detectedArtist: {
               type: 'STRING',
               description: 'The name of any music artist, band, or singer clearly recognized in the image, e.g. "Billie Eilish", "Nirvana". Return empty string if no specific artist is identified.'
+            },
+            recommendedSongs: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  title: { type: 'STRING' },
+                  artist: { type: 'STRING' }
+                },
+                required: ['title', 'artist']
+              },
+              description: 'A list of exactly 15 to 20 specific, real-world songs matching the mood and aesthetic of the image.'
             }
           },
           required: [
@@ -159,7 +194,8 @@ Map the image vibe to Spotify's numerical audio features:
             'seedGenres',
             'valence',
             'energy',
-            'acousticness'
+            'acousticness',
+            'recommendedSongs'
           ]
         }
       }

@@ -733,3 +733,80 @@ export async function getPlaylistTracks(token, playlistId) {
   return tracks;
 }
 
+/**
+ * Search Spotify for a specific track by its title and artist.
+ * Uses exact field matches first, falling back to a loose general query.
+ * @param {string} token - Spotify access token
+ * @param {string} title - Song title
+ * @param {string} artist - Artist name
+ * @returns {Promise<object|null>} Track object, or null if not found
+ */
+export async function searchTrackByDetails(token, title, artist) {
+  if (process.env.NODE_ENV === 'test') {
+    return {
+      id: `mock_track_${Buffer.from(title).toString('hex').slice(0, 8)}`,
+      uri: `spotify:track:mock_track_${Buffer.from(title).toString('hex').slice(0, 8)}`,
+      name: title,
+      artists: [{ name: artist }],
+      album: {
+        name: "Mock Album",
+        images: [
+          { url: "https://via.placeholder.com/150" },
+          { url: "https://via.placeholder.com/150" },
+          { url: "https://via.placeholder.com/48" }
+        ]
+      },
+      duration_ms: 180000,
+      preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+    };
+  }
+
+  // Construct structured query like: track:"Title" artist:"Artist"
+  const query = `track:"${title}" artist:"${artist}"`;
+  const url = `https://api.spotify.com/v1/search?${new URLSearchParams({
+    q: query,
+    type: 'track',
+    limit: '1'
+  }).toString()}`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const items = data.tracks?.items || [];
+      if (items.length > 0) {
+        return items[0];
+      }
+      
+      // Fallback: search more generally if exact track/artist query fails
+      const fallbackQuery = `${title} ${artist}`;
+      const fallbackUrl = `https://api.spotify.com/v1/search?${new URLSearchParams({
+        q: fallbackQuery,
+        type: 'track',
+        limit: '1'
+      }).toString()}`;
+      
+      const fallbackResponse = await fetch(fallbackUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (fallbackResponse.ok) {
+        const fallbackData = await fallbackResponse.json();
+        const fallbackItems = fallbackData.tracks?.items || [];
+        if (fallbackItems.length > 0) {
+          return fallbackItems[0];
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`Failed to search track "${title}" by "${artist}":`, err);
+  }
+  return null;
+}
+
+

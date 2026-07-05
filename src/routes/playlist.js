@@ -97,19 +97,7 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
     // 1. Ingestion: Read file buffer to send to Gemini
     const fileBuffer = await fs.promises.readFile(filePath);
 
-    const customPrompt = req.body.customPrompt || '';
-
-    // 2. LLM Parsing: Extract visual/emotional cues and Spotify metrics
-    console.log("Analyzing image with Gemini Flash...");
-    const metadata = await parsePlaylistImage(fileBuffer, mimeType, customPrompt, req.file.originalname);
-    console.log("Gemini parsed metadata:", JSON.stringify(metadata, null, 2));
-
-    // 3. Upload file to storage provider (S3/R2 or local fallback)
-    console.log("Uploading file to storage provider...");
-    const webImagePath = await uploadFile(filePath, mimeType);
-    console.log(`File uploaded successfully. Web URL/Path: ${webImagePath}`);
-
-    // 4. Spotify Match: Resolve recommendations
+    // 2. Spotify Match Setup: Resolve Spotify Token first to query past playlists
     let spotifyToken;
     if (spotifyUserId) {
       spotifyToken = await getValidUserToken(spotifyUserId);
@@ -119,65 +107,87 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
       spotifyToken = await spotify.getClientCredentialsToken();
     }
 
-    // Pool A: Image-based track pool (Artist tracks or visual recommendations)
-    let poolA = [];
-    if (metadata.detectedArtist && metadata.detectedArtist.trim()) {
-      console.log(`Detected artist: "${metadata.detectedArtist.trim()}" - fetching their top tracks...`);
-      poolA = await spotify.getArtistTopTracks(spotifyToken, metadata.detectedArtist.trim());
-      // Limit to 10 if customPrompt is present to make it 50/50
-      if (customPrompt && customPrompt.trim()) {
-        poolA = poolA.slice(0, 10);
-      }
-    } else {
-      console.log("No specific artist detected - fetching visual recommendations...");
-      poolA = await spotify.getRecommendations(
-        spotifyToken,
-        metadata.seedGenres,
-        metadata.valence,
-        metadata.energy,
-        metadata.acousticness,
-        customPrompt,
-        metadata.emotionalVibe
-      );
-      // Limit to 10 if customPrompt is present to make it 50/50
-      if (customPrompt && customPrompt.trim()) {
-        poolA = poolA.slice(0, 10);
-      }
-    }
-
-    // Pool B: Prompt-based track pool
-    let poolB = [];
-    if (customPrompt && customPrompt.trim()) {
-      console.log(`Custom prompt provided: "${customPrompt.trim()}" - fetching matching search tracks...`);
-      poolB = await spotify.searchTracks(spotifyToken, customPrompt.trim(), 10);
-    }
-
-    // Interleave Pool A and Pool B 50/50 if customPrompt is present to ensure equal weightage
-    let finalTracks = [];
-    if (customPrompt && customPrompt.trim() && poolB.length > 0) {
-      console.log(`Interleaving ${poolA.length} image tracks and ${poolB.length} prompt tracks...`);
-      const maxLength = Math.max(poolA.length, poolB.length);
-      for (let i = 0; i < maxLength; i++) {
-        if (i < poolA.length) {
-          finalTracks.push(poolA[i]);
+    // Retrieve historical tracks to prevent repeat recommendations
+    const excludedSongs = [];
+    if (spotifyUserId) {
+      try {
+        const pastGenerations = await db.generation.findMany({
+          where: { user_id: spotifyUserId, NOT: { playlist_id: null } },
+          take: 3,
+          orderBy: { created_at: 'desc' }
+        });
+        
+        console.log(`Checking ${pastGenerations.length} past playlists for repeat recommendations...`);
+        const fetchPromises = pastGenerations.map(async (gen) => {
+          try {
+            return await spotify.getPlaylistTracks(spotifyToken, gen.playlist_id);
+          } catch (err) {
+            console.warn(`Failed to fetch tracks for past playlist ${gen.playlist_id}:`, err);
+            return [];
+          }
+        });
+        
+        const results = await Promise.all(fetchPromises);
+        for (const tracks of results) {
+          for (const track of tracks) {
+            if (track && track.name) {
+              excludedSongs.push(`${track.name} by ${track.artists?.[0]?.name || ''}`);
+            }
+          }
         }
-        if (i < poolB.length) {
-          finalTracks.push(poolB[i]);
-        }
+      } catch (dbErr) {
+        console.warn("Failed to retrieve historical tracks for repeat check:", dbErr);
       }
-      finalTracks = finalTracks.slice(0, 20);
-    } else {
-      finalTracks = poolA;
     }
 
-    // Deduplicate final track list to guarantee 100% uniqueness
-    const seenTracks = new Set();
+    const customPrompt = req.body.customPrompt || '';
+
+    // 3. LLM Parsing: Extract visual/emotional cues and Spotify metrics
+    console.log("Analyzing image with Gemini Flash...");
+    const metadata = await parsePlaylistImage(fileBuffer, mimeType, customPrompt, req.file.originalname, excludedSongs.slice(0, 50));
+    console.log("Gemini parsed metadata:", JSON.stringify(metadata, null, 2));
+
+    // 4. Upload file to storage provider (S3/R2 or local fallback)
+    console.log("Uploading file to storage provider...");
+    const webImagePath = await uploadFile(filePath, mimeType);
+    console.log(`File uploaded successfully. Web URL/Path: ${webImagePath}`);
+
+    const recommendedSongs = metadata.recommendedSongs || [];
+    console.log(`AI recommended ${recommendedSongs.length} tracks - resolving on Spotify...`);
+
+    // Fetch details for each recommended track in parallel
+    const searchPromises = recommendedSongs.map(async (song) => {
+      try {
+        return await spotify.searchTrackByDetails(spotifyToken, song.title, song.artist);
+      } catch (err) {
+        console.warn(`Failed to resolve track "${song.title}" by "${song.artist}" on Spotify:`, err);
+        return null;
+      }
+    });
+
+    const searchResults = await Promise.all(searchPromises);
+    let finalTracks = searchResults.filter(track => track !== null);
+
+    // Deduplicate final track list to guarantee 100% uniqueness by normalized title and artist
+    // and filter out repeat recommendations from past playlists
+    const seenTitles = new Set();
+    const pastTitles = new Set(excludedSongs.map(s => {
+      const parts = s.split(' by ');
+      const title = parts[0].toLowerCase().replace(/\s*[\(\[-].*$/g, '').trim();
+      const artist = parts[1]?.toLowerCase() || '';
+      return `${title} - ${artist}`;
+    }));
+
     finalTracks = finalTracks.filter(track => {
       if (!track || !track.id) return false;
-      if (seenTracks.has(track.id)) {
+      const cleanTitle = track.name.toLowerCase().replace(/\s*[\(\[-].*$/g, '').trim();
+      const artistName = track.artists?.[0]?.name?.toLowerCase() || '';
+      const uniqueKey = `${cleanTitle} - ${artistName}`;
+      
+      if (seenTitles.has(uniqueKey) || pastTitles.has(uniqueKey)) {
         return false;
       }
-      seenTracks.add(track.id);
+      seenTitles.add(uniqueKey);
       return true;
     });
 
