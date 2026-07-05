@@ -431,7 +431,11 @@ async function handleAuthSubmit(e) {
   const passwordInput = document.getElementById('authPassword');
   const btnSubmitAuth = document.getElementById('btnSubmitAuth');
   
-  if (!emailInput || !passwordInput || !supabase) return;
+  if (!emailInput || !passwordInput) return;
+  if (!supabase) {
+    alert('Authentication service is not fully configured on the server. Please ensure SUPABASE_URL and SUPABASE_ANON_KEY are set in your DigitalOcean App Platform environment variables.');
+    return;
+  }
   
   const email = emailInput.value.trim();
   const password = passwordInput.value;
