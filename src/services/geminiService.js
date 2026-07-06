@@ -123,93 +123,121 @@ CRITICAL DIRECTIVE: Recommend exactly 15 to 20 specific, real-world songs that p
 - ${excludeSongs.join('\n- ')}`;
   }
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: base64Data
-          }
-        },
-        prompt
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            dominantColorPalette: {
-              type: 'ARRAY',
-              items: { type: 'STRING' },
-              description: '2 to 4 dominant colors or aesthetics in the image, e.g. ["neon blue", "cyberpunk purple", "dark synthwave", "pastel pink"]'
-            },
-            environmentalContext: {
-              type: 'STRING',
-              description: 'The physical or environmental context depicted, e.g. "rainy neon city streets", "retro-vintage sunlit beach", "minimalist bedroom"'
-            },
-            emotionalVibe: {
-              type: 'STRING',
-              description: 'The primary emotional vibe, e.g. "melancholic nostalgia", "high-energy workout", "calming lo-fi chill"'
-            },
-            seedGenres: {
-              type: 'ARRAY',
-              items: { type: 'STRING' },
-              description: 'Exactly 3 genres that represent the style of music matching this image. MUST be selected from the provided valid Spotify seed list.'
-            },
-            valence: {
-              type: 'NUMBER',
-              description: 'Target valence (0.0 to 1.0) indicating brightness/positivity.'
-            },
-            energy: {
-              type: 'NUMBER',
-              description: 'Target energy (0.0 to 1.0) indicating intensity/activity.'
-            },
-            acousticness: {
-              type: 'NUMBER',
-              description: 'Target acousticness (0.0 to 1.0) indicating organic vs electronic instrumentation.'
-            },
-            detectedArtist: {
-              type: 'STRING',
-              description: 'The name of any music artist, band, or singer clearly recognized in the image, e.g. "Billie Eilish", "Nirvana". Return empty string if no specific artist is identified.'
-            },
-            recommendedSongs: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  title: { type: 'STRING' },
-                  artist: { type: 'STRING' }
-                },
-                required: ['title', 'artist']
-              },
-              description: 'A list of exactly 15 to 20 specific, real-world songs matching the mood and aesthetic of the image.'
+  const maxRetries = 3;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data
             }
           },
-          required: [
-            'dominantColorPalette',
-            'environmentalContext',
-            'emotionalVibe',
-            'seedGenres',
-            'valence',
-            'energy',
-            'acousticness',
-            'recommendedSongs'
-          ]
+          prompt
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              dominantColorPalette: {
+                type: 'ARRAY',
+                items: { type: 'STRING' },
+                description: '2 to 4 dominant colors or aesthetics in the image, e.g. ["neon blue", "cyberpunk purple", "dark synthwave", "pastel pink"]'
+              },
+              environmentalContext: {
+                type: 'STRING',
+                description: 'The physical or environmental context depicted, e.g. "rainy neon city streets", "retro-vintage sunlit beach", "minimalist bedroom"'
+              },
+              emotionalVibe: {
+                type: 'STRING',
+                description: 'The primary emotional vibe, e.g. "melancholic nostalgia", "high-energy workout", "calming lo-fi chill"'
+              },
+              seedGenres: {
+                type: 'ARRAY',
+                items: { type: 'STRING' },
+                description: 'Exactly 3 genres that represent the style of music matching this image. MUST be selected from the provided valid Spotify seed list.'
+              },
+              valence: {
+                type: 'NUMBER',
+                description: 'Target valence (0.0 to 1.0) indicating brightness/positivity.'
+              },
+              energy: {
+                type: 'NUMBER',
+                description: 'Target energy (0.0 to 1.0) indicating intensity/activity.'
+              },
+              acousticness: {
+                type: 'NUMBER',
+                description: 'Target acousticness (0.0 to 1.0) indicating organic vs electronic instrumentation.'
+              },
+              detectedArtist: {
+                type: 'STRING',
+                description: 'The name of any music artist, band, or singer clearly recognized in the image, e.g. "Billie Eilish", "Nirvana". Return empty string if no specific artist is identified.'
+              },
+              recommendedSongs: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    title: { type: 'STRING' },
+                    artist: { type: 'STRING' }
+                  },
+                  required: ['title', 'artist']
+                },
+                description: 'A list of exactly 15 to 20 specific, real-world songs matching the mood and aesthetic of the image.'
+              }
+            },
+            required: [
+              'dominantColorPalette',
+              'environmentalContext',
+              'emotionalVibe',
+              'seedGenres',
+              'valence',
+              'energy',
+              'acousticness',
+              'recommendedSongs'
+            ]
+          }
         }
+      });
+
+      const contentText = response.text;
+      if (!contentText) {
+        throw new Error("No content returned from Gemini Flash.");
       }
-    });
 
-    const contentText = response.text;
-    if (!contentText) {
-      throw new Error("No content returned from Gemini Flash.");
+      const metadata = JSON.parse(contentText);
+      return metadata;
+    } catch (error) {
+      attempt++;
+      console.warn(`Gemini API Error (Attempt ${attempt}/${maxRetries}):`, error);
+
+      if (attempt >= maxRetries) {
+        const cleanMsg = getCleanGeminiErrorMessage(error);
+        throw new Error(`Failed to parse image with Gemini Flash: ${cleanMsg}`);
+      }
+
+      // Exponential backoff: 800ms, 1600ms
+      const backoffMs = Math.pow(2, attempt) * 400;
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
     }
-
-    const metadata = JSON.parse(contentText);
-    return metadata;
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    throw new Error(`Failed to parse image with Gemini Flash: ${error.message}`);
   }
+}
+
+/**
+ * Format raw Gemini errors into clean, user-facing error messages.
+ */
+function getCleanGeminiErrorMessage(error) {
+  const msg = error.message || '';
+  if (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand') || msg.includes('overloaded')) {
+    return 'The music recommendation engine is temporarily overloaded due to high demand. Please try again in a few seconds.';
+  }
+  if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Rate limit')) {
+    return 'The AI analysis service rate limit has been exceeded. Please wait a moment and try again.';
+  }
+  return msg;
 }
