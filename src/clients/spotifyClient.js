@@ -34,6 +34,12 @@ function getBasicAuthHeader() {
 const fetch = async function spotifyFetch(url, options = {}, retries = 3) {
   const response = await globalThis.fetch(url, options);
   
+  if (response.status === 401) {
+    console.warn("[Spotify API] 401 Unauthorized received. Invalidating cached tokens.");
+    clientTokenCache = { accessToken: null, expiresAt: 0 };
+    masterTokenCache = { accessToken: null, expiresAt: 0 };
+  }
+  
   if (response.status === 429) {
     const retryAfterHeader = response.headers.get('Retry-After');
     let delaySeconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 2;

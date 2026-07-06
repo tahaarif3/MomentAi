@@ -227,6 +227,21 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
       return true;
     });
 
+    // Failsafe backup: If no songs resolved from Gemini's specific list (e.g. Spotify search lookup failures),
+    // fall back to popular tracks for the seed genres directly from Spotify's catalog.
+    if (finalTracks.length === 0) {
+      console.warn("Spotify failed to resolve any of Gemini's specific recommendations. Running backup genre-based recommendation...");
+      try {
+        const backupPool = await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, []);
+        if (backupPool.length > 0) {
+          const splitIndex = Math.ceil(backupPool.length / 2);
+          finalTracks = backupPool.slice(0, splitIndex);
+        }
+      } catch (backupErr) {
+        console.error("Failsafe backup recommendation also failed:", backupErr);
+      }
+    }
+
     let generationId = crypto.randomUUID();
 
     // 5. Token deduction and history logging (only if user is logged in)
