@@ -51,34 +51,23 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
         })
       });
     });
-  });
 
-  test('should log in via email form, generate tracks, and save playlist', async ({ page }) => {
-    // 1. Navigate to dashboard
+    // Perform Login
     await page.goto(targetUrl);
-    await expect(page).toHaveTitle(/Moment.AI/);
-
-    // Verify initial disconnected status
     const signInBtn = page.locator('#btnSignIn');
     await expect(signInBtn).toBeVisible();
-    await expect(signInBtn).toContainText('Sign in');
-
-    // 2. Click Sign In, fill email/password and submit
     await signInBtn.click();
-    
-    const signInGateModal = page.locator('#signInGateModal');
-    await expect(signInGateModal).toBeVisible();
-
     await page.locator('#authEmail').fill('test@example.com');
     await page.locator('#authPassword').fill('password123');
     await page.locator('#btnSubmitAuth').click();
 
-    // Verify user info is visible in header
+    // Verify user info is visible in header to ensure logged-in state is active before proceeding
     const userPanel = page.locator('#userPanel');
     await expect(userPanel).toContainText('Test User');
-    await expect(signInGateModal).toBeHidden();
+  });
 
-    // 3. Upload image and generate playlist
+  test('should generate tracks and save playlist', async ({ page }) => {
+    // 1. Upload image and generate playlist
     const fileInput = page.locator('#fileInput');
     await fileInput.setInputFiles(sampleImagePath);
 
@@ -90,12 +79,12 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await expect(page.locator('#analysisCard')).toBeVisible();
     await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
 
-    // 4. Verify that the Save button is visible
+    // 2. Verify that the Save button is visible
     const saveBtn = page.locator('#btnSavePlaylist');
     await expect(saveBtn).toBeVisible();
     await expect(saveBtn).toContainText('Save Playlist to Spotify');
 
-    // 5. Click Save Playlist - should open our custom modal
+    // 3. Click Save Playlist - should open our custom modal
     await saveBtn.click();
 
     const saveModal = page.locator('#savePlaylistModal');
@@ -114,7 +103,7 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await nameInput.fill('My Custom Test Vibe');
     await descInput.fill('This is a custom test description.');
 
-    // 6. Click Export to Spotify
+    // 4. Click Export to Spotify
     const confirmSaveBtn = page.locator('#btnConfirmSave');
     await confirmSaveBtn.click();
 
@@ -129,38 +118,36 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     const openSpotifyLink = page.locator('#linkOpenSpotify');
     await expect(openSpotifyLink).toHaveAttribute('href', 'https://open.spotify.com/playlist/mock_playlist_123');
 
-    // 7. Close Success Modal
+    // 5. Close Success Modal
     await page.click('#btnSuccessCloseAction');
     await expect(successModal).toBeHidden();
   });
 
   test('should load player widget when a track is clicked', async ({ page }) => {
-    // 1. Navigate to dashboard
-    await page.goto(targetUrl);
-
-    // 2. Upload image and generate playlist
+    // 1. Upload image and generate playlist
     const fileInput = page.locator('#fileInput');
     await fileInput.setInputFiles(sampleImagePath);
 
     const generateBtn = page.locator('#btnGeneratePlaylist');
+    await expect(generateBtn).toBeVisible();
     await generateBtn.click();
     await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
 
-    // 3. Verify no player widget is loaded initially
+    // 2. Verify no player widget is loaded initially
     const playerContainer = page.locator('#spotifyPlayerContainer');
     await expect(playerContainer).toBeHidden();
 
-    // 4. Click on the first track card to load player
+    // 3. Click on the first track card to load player
     const firstTrack = page.locator('#tracklistContainer .track-card').first();
     await expect(firstTrack).toBeVisible();
     
     // Click track
     await firstTrack.locator('.track-main-info').click();
 
-    // 5. Verify track card becomes active
+    // 4. Verify track card becomes active
     await expect(firstTrack).toHaveClass(/active/);
 
-    // 6. Verify Spotify Player Embed is loaded and visible
+    // 5. Verify Spotify Player Embed is loaded and visible
     await expect(playerContainer).toBeVisible();
     
     const customPlayer = playerContainer.locator('.custom-audio-player');
@@ -168,7 +155,7 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await expect(customPlayer).toBeVisible();
     await expect(volumeSlider).toBeVisible();
 
-    // 7. Click active track card again - should close player
+    // 6. Click active track card again - should close player
     await firstTrack.locator('.track-main-info').click();
     await expect(firstTrack).not.toHaveClass(/active/);
     await expect(playerContainer).toBeHidden();

@@ -178,11 +178,25 @@ function setupEventListeners() {
   }
 
   // Drag and drop events
-  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('click', (e) => {
+    if (!authState.loggedIn) {
+      e.preventDefault();
+      openAuthModal('signup');
+    } else {
+      fileInput.click();
+    }
+  });
   fileInput.addEventListener('change', handleFileSelect);
 
   if (btnUploadMoment) {
-    btnUploadMoment.addEventListener('click', () => fileInput.click());
+    btnUploadMoment.addEventListener('click', (e) => {
+      if (!authState.loggedIn) {
+        e.preventDefault();
+        openAuthModal('signup');
+      } else {
+        fileInput.click();
+      }
+    });
   }
 
   if (btnNewPhoto) {
@@ -205,6 +219,10 @@ function setupEventListeners() {
   dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('dragover');
+    if (!authState.loggedIn) {
+      openAuthModal('signup');
+      return;
+    }
     if (e.dataTransfer.files.length > 0) {
       processSelectedFile(e.dataTransfer.files[0]);
     }
@@ -462,7 +480,7 @@ async function handleAuthSubmit(e) {
     passwordInput.value = '';
     
     if (currentAuthMode === 'signup') {
-      alert('Account created! Please check your email for confirmation (if enabled) or sign in.');
+      alert('Account created successfully! You are now signed in.');
     }
   } catch (error) {
     console.error('Authentication failed:', error);
@@ -604,6 +622,10 @@ function handleFileSelect(e) {
 }
 
 function processSelectedFile(file) {
+  if (!authState.loggedIn) {
+    openAuthModal('signup');
+    return;
+  }
   // Validate type
   const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
   if (!validTypes.includes(file.type)) {
