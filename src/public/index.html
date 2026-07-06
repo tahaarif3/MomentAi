@@ -307,7 +307,8 @@
         
         <div class="modal-grids">
           <!-- Option 1: Token Pack -->
-          <div class="pricing-card">
+           <div class="pricing-card" style="position: relative;">
+            <div class="badge-coming-soon" style="background: #e63946; color: #fff; font-size: 0.75rem; font-weight: 700; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-bottom: 0.5rem; width: fit-content; text-transform: uppercase;">COMING SOON</div>
             <h3>Token Pack</h3>
             <div class="price">$1.99<span>/ 20 tokens</span></div>
             <p class="pricing-desc">Perfect for casual curators. Buy generations on-demand.</p>
@@ -316,12 +317,12 @@
               <li>✓ Standard image processing</li>
               <li>✓ Standard recommendation engine</li>
             </ul>
-            <button class="btn btn-secondary btn-full" id="btnBuyTokens">Purchase Pack</button>
+            <button class="btn btn-secondary btn-full" id="btnBuyTokens" disabled style="opacity: 0.6; cursor: not-allowed; background: #6c757d; border-color: #6c757d; color: #fff;">Coming Soon</button>
           </div>
 
           <!-- Option 2: Premium Subscription -->
           <div class="pricing-card featured">
-            <div class="badge-featured">RECOMMENDED</div>
+            <div class="badge-featured" style="background: #e63946; color: #fff;">COMING SOON</div>
             <h3>Premium Pass</h3>
             <div class="price">$3.99<span>/ month</span></div>
             <p class="pricing-desc">For true audiophiles. Curate without boundaries.</p>
@@ -331,7 +332,7 @@
               <li>✓ Advanced mood toggles</li>
               <li>✓ Ad-free experience</li>
             </ul>
-            <button class="btn btn-primary btn-full" id="btnBuyPremium">Upgrade to Premium</button>
+            <button class="btn btn-primary btn-full" id="btnBuyPremium" disabled style="opacity:0.6; cursor:not-allowed; background:#6c757d; border-color:#6c757d;">Coming Soon</button>
           </div>
         </div>
       </div>
