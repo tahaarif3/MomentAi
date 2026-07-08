@@ -476,7 +476,7 @@ export async function getRecommendations(token, seedGenres, targetValence, targe
  * Fallback recommendation generator using Spotify Search API.
  * Searches for tracks matching the specified genres and blends them.
  */
-async function getRecommendationsFallback(token, seedGenres, customPrompt = '', emotionalVibe = '') {
+export async function getRecommendationsFallback(token, seedGenres, customPrompt = '', emotionalVibe = '') {
   if (!seedGenres || seedGenres.length === 0) {
     seedGenres = ['pop', 'indie', 'electronic'];
   }
