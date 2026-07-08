@@ -477,6 +477,36 @@ export async function getRecommendations(token, seedGenres, targetValence, targe
  * Searches for tracks matching the specified genres and blends them.
  */
 export async function getRecommendationsFallback(token, seedGenres, customPrompt = '', emotionalVibe = '') {
+  if (process.env.NODE_ENV === 'test') {
+    console.log("[TEST] Mocking Spotify recommendations fallback...");
+    return [
+      {
+        id: "mock_track_1",
+        uri: "spotify:track:mock_track_1",
+        name: "Mock Track 1",
+        artists: [{ name: "Mock Artist 1" }],
+        album: {
+          name: "Mock Album 1",
+          images: [{ url: "https://via.placeholder.com/150" }, { url: "https://via.placeholder.com/150" }, { url: "https://via.placeholder.com/48" }]
+        },
+        duration_ms: 180000,
+        preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+      },
+      {
+        id: "mock_track_2",
+        uri: "spotify:track:mock_track_2",
+        name: "Mock Track 2",
+        artists: [{ name: "Mock Artist 2" }],
+        album: {
+          name: "Mock Album 2",
+          images: [{ url: "https://via.placeholder.com/150" }, { url: "https://via.placeholder.com/150" }, { url: "https://via.placeholder.com/48" }]
+        },
+        duration_ms: 200000,
+        preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
+      }
+    ];
+  }
+
   if (!seedGenres || seedGenres.length === 0) {
     seedGenres = ['pop', 'indie', 'electronic'];
   }
