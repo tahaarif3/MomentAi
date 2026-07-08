@@ -14,11 +14,41 @@ let masterTokenCache = {
 
 let masterUserIdCache = null;
 
-// ─── Client Credentials Token Cache ───────────────────────────────────────────
-let clientTokenCache = {
-  accessToken: null,
-  expiresAt: 0
-};
+// ─── Rotating Client Credentials App Pool ───────────────────────────────────────
+const clientPool = [
+  {
+    id: process.env.SPOTIFY_CLIENT_ID,
+    secret: process.env.SPOTIFY_CLIENT_SECRET,
+    accessToken: null,
+    expiresAt: 0,
+    isRateLimited: false,
+    rateLimitResetTime: 0
+  }
+];
+
+if (process.env.SPOTIFY_CLIENT_ID_2 && process.env.SPOTIFY_CLIENT_SECRET_2) {
+  clientPool.push({
+    id: process.env.SPOTIFY_CLIENT_ID_2,
+    secret: process.env.SPOTIFY_CLIENT_SECRET_2,
+    accessToken: null,
+    expiresAt: 0,
+    isRateLimited: false,
+    rateLimitResetTime: 0
+  });
+}
+
+if (process.env.SPOTIFY_CLIENT_ID_3 && process.env.SPOTIFY_CLIENT_SECRET_3) {
+  clientPool.push({
+    id: process.env.SPOTIFY_CLIENT_ID_3,
+    secret: process.env.SPOTIFY_CLIENT_SECRET_3,
+    accessToken: null,
+    expiresAt: 0,
+    isRateLimited: false,
+    rateLimitResetTime: 0
+  });
+}
+
+let activeClientIndex = 0;
 
 // Helper to base64 encode Spotify Client Credentials
 function getBasicAuthHeader() {
@@ -30,41 +60,169 @@ function getBasicAuthHeader() {
   return 'Basic ' + Buffer.from(clientId + ':' + clientSecret).toString('base64');
 }
 
+// ─── Spotify API Circuit Breaker ──────────────────────────────────────────────
+let isRateLimited = false;
+let rateLimitResetTime = 0;
+
+// Helper to check circuit breaker state
+function checkCircuitBreaker() {
+  if (isRateLimited) {
+    if (Date.now() < rateLimitResetTime) {
+      const secondsLeft = Math.ceil((rateLimitResetTime - Date.now()) / 1000);
+      throw new Error(`Spotify API rate limit is active. Please try again in ${secondsLeft} seconds.`);
+    } else {
+      isRateLimited = false;
+      rateLimitResetTime = 0;
+    }
+  }
+}
+
+// ─── In-Memory TTL Cache for Track Search Results ──────────────────────────────
+class SimpleMemoryCache {
+  constructor(maxSize = 2000, ttlMs = 24 * 60 * 60 * 1000) { // 24 hours default
+    this.maxSize = maxSize;
+    this.ttlMs = ttlMs;
+    this.cache = new Map();
+  }
+
+  get(key) {
+    const item = this.cache.get(key);
+    if (!item) return null;
+    if (Date.now() > item.expiresAt) {
+      this.cache.delete(key);
+      return null;
+    }
+    return item.value;
+  }
+
+  set(key, value) {
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+    this.cache.set(key, {
+      value,
+      expiresAt: Date.now() + this.ttlMs
+    });
+  }
+}
+
+const searchCache = new SimpleMemoryCache(5000, 24 * 60 * 60 * 1000); // Cache up to 5000 tracks for 24 hours
+
+// ─── Global Request Queue & Throttler for Spotify API ───────────────────────────
+class RequestThrottler {
+  constructor(requestsPerSecond = 5) {
+    this.limit = requestsPerSecond;
+    this.interval = 1000;
+    this.tokens = requestsPerSecond;
+    this.lastReset = Date.now();
+    this.queue = [];
+    this.timeoutId = null;
+  }
+
+  async enqueue(fn) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ fn, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  processQueue() {
+    const now = Date.now();
+    if (now - this.lastReset >= this.interval) {
+      this.tokens = this.limit;
+      this.lastReset = now;
+    }
+
+    while (this.queue.length > 0 && this.tokens > 0) {
+      this.tokens--;
+      const { fn, resolve, reject } = this.queue.shift();
+      fn().then(resolve).catch(reject);
+    }
+
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+
+    if (this.queue.length > 0) {
+      const timeToNextWindow = this.interval - (Date.now() - this.lastReset);
+      this.timeoutId = setTimeout(() => {
+        this.timeoutId = null;
+        this.processQueue();
+      }, Math.max(0, timeToNextWindow));
+    }
+  }
+}
+
+const spotifyThrottler = new RequestThrottler(5); // Throttle to 5 requests per second globally
+
 // Shadow global fetch to automatically handle Spotify rate limits (429) and network retries
 const fetch = async function spotifyFetch(url, options = {}, retries = 3) {
-  const response = await globalThis.fetch(url, options);
-  
-  if (response.status === 401) {
-    console.warn("[Spotify API] 401 Unauthorized received. Invalidating cached tokens.");
-    clientTokenCache = { accessToken: null, expiresAt: 0 };
-    masterTokenCache = { accessToken: null, expiresAt: 0 };
-  }
-  
-  if (response.status === 429) {
-    const retryAfterHeader = response.headers.get('Retry-After');
-    let delaySeconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 2;
+  // Check circuit breaker before queueing
+  checkCircuitBreaker();
+
+  return spotifyThrottler.enqueue(async () => {
+    // Re-check circuit breaker inside queue
+    checkCircuitBreaker();
+
+    const response = await globalThis.fetch(url, options);
     
-    if (isNaN(delaySeconds)) {
-      delaySeconds = 2;
+    if (response.status === 401) {
+      try {
+        const clone = response.clone();
+        const errText = await clone.text().catch(() => '');
+        if (errText.includes('expired') || errText.includes('Invalid access token') || errText.includes('invalid_client')) {
+          console.warn("[Spotify API] Token expired or invalid. Invalidating cached tokens.");
+          for (const c of clientPool) {
+            c.accessToken = null;
+            c.expiresAt = 0;
+          }
+          masterTokenCache = { accessToken: null, expiresAt: 0 };
+        } else {
+          console.warn(`[Spotify API] 401 received but not invalidating tokens: ${errText}`);
+        }
+      } catch (e) {
+        for (const c of clientPool) {
+          c.accessToken = null;
+          c.expiresAt = 0;
+        }
+        masterTokenCache = { accessToken: null, expiresAt: 0 };
+      }
     }
     
-    const delayMs = (delaySeconds * 1000) + 200; // Add 200ms buffer
-    
-    // If the rate limit delay is excessive (more than 10 seconds), fail immediately
-    // to prevent hanging Node.js and to stop hammering Spotify.
-    if (delaySeconds > 10) {
-      console.error(`[Spotify API] 429 Rate Limit: Spotify requested a long wait of ${delaySeconds} seconds. Failing immediately to prevent lockout.`);
-      throw new Error(`Spotify API rate limit is too high (${delaySeconds}s). Please try again in a few minutes.`);
+    if (response.status === 429) {
+      const retryAfterHeader = response.headers.get('Retry-After');
+      let delaySeconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 2;
+      
+      if (isNaN(delaySeconds)) {
+        delaySeconds = 2;
+      }
+      
+      // Trip the circuit breaker!
+      isRateLimited = true;
+      rateLimitResetTime = Date.now() + (delaySeconds * 1000);
+      console.warn(`[Spotify API] 429 Rate Limit. Circuit Breaker tripped for ${delaySeconds}s.`);
+      
+      const delayMs = (delaySeconds * 1000) + 200; // Add 200ms buffer
+      
+      if (delaySeconds > 10) {
+        console.error(`[Spotify API] 429 Rate Limit: Spotify requested a long wait of ${delaySeconds} seconds. Failing immediately to prevent lockout.`);
+        throw new Error(`Spotify API rate limit is too high (${delaySeconds}s). Please try again in a few minutes.`);
+      }
+      
+      if (retries > 0) {
+        console.warn(`[Spotify API] 429 Rate Limit. Waiting ${delayMs}ms... (Retries left: ${retries})`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        // Reset circuit breaker temporarily to allow the retry execution
+        isRateLimited = false;
+        rateLimitResetTime = 0;
+        return spotifyFetch(url, options, retries - 1);
+      }
     }
     
-    if (retries > 0) {
-      console.warn(`[Spotify API] 429 Rate Limit. Waiting ${delayMs}ms... (Retries left: ${retries})`);
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-      return spotifyFetch(url, options, retries - 1);
-    }
-  }
-  
-  return response;
+    return response;
+  });
 };
 
 /**
@@ -77,36 +235,59 @@ export async function getClientCredentialsToken() {
     return 'mock_client_credentials_token';
   }
 
-  // Return cached token if still valid (60s buffer)
-  if (clientTokenCache.accessToken && Date.now() < (clientTokenCache.expiresAt - 60000)) {
-    return clientTokenCache.accessToken;
-  }
+  const startIndex = activeClientIndex;
+  do {
+    const client = clientPool[activeClientIndex];
 
-  console.log('Refreshing Spotify Client Credentials token...');
-  const url = 'https://accounts.spotify.com/api/token';
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': getBasicAuthHeader(),
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials'
-    })
-  });
+    // Check rate limit status for this specific app
+    if (client.isRateLimited) {
+      if (Date.now() < client.rateLimitResetTime) {
+        // Rotate and check the next one
+        activeClientIndex = (activeClientIndex + 1) % clientPool.length;
+        continue;
+      } else {
+        client.isRateLimited = false;
+        client.rateLimitResetTime = 0;
+      }
+    }
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Failed to obtain Spotify Client Credentials token: ${response.statusText} - ${errText}`);
-  }
+    // Return cached token if still valid (60s buffer)
+    if (client.accessToken && Date.now() < (client.expiresAt - 60000)) {
+      return client.accessToken;
+    }
 
-  const data = await response.json();
-  clientTokenCache = {
-    accessToken: data.access_token,
-    expiresAt: Date.now() + (data.expires_in * 1000)
-  };
+    console.log(`Refreshing Spotify Client Credentials token for Client App ${activeClientIndex + 1}...`);
+    try {
+      const basicAuth = 'Basic ' + Buffer.from(client.id + ':' + client.secret).toString('base64');
+      const response = await globalThis.fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+          'Authorization': basicAuth,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials'
+        })
+      });
 
-  return clientTokenCache.accessToken;
+      if (response.ok) {
+        const data = await response.json();
+        client.accessToken = data.access_token;
+        client.expiresAt = Date.now() + (data.expires_in * 1000);
+        return client.accessToken;
+      } else {
+        const errText = await response.text();
+        console.warn(`Failed to obtain Spotify Client Credentials token for Client App ${activeClientIndex + 1}: ${response.statusText} - ${errText}`);
+      }
+    } catch (err) {
+      console.warn(`Error refreshing token for Client App ${activeClientIndex + 1}:`, err);
+    }
+
+    // Try rotating if refresh failed
+    activeClientIndex = (activeClientIndex + 1) % clientPool.length;
+  } while (activeClientIndex !== startIndex);
+
+  throw new Error("All Spotify Developer Applications in the pool are currently rate-limited or failed to refresh.");
 }
 
 /**
@@ -287,7 +468,7 @@ export async function getRecommendations(token, seedGenres, targetValence, targe
     ];
   }
 
-  // Directly forward to the search-based fallback engine to avoid unnecessary network API errors and delays
+  // Spotify discontinued the /v1/recommendations endpoint — go directly to search-based fallback
   return await getRecommendationsFallback(token, seedGenres, customPrompt, emotionalVibe);
 }
 
@@ -510,24 +691,33 @@ export async function createPlaylist(userId, token, name, description, isPublic 
  * @returns {Promise<object>} Spotify response { snapshot_id }
  */
 export async function addTracksToPlaylist(token, playlistId, trackUris) {
+  if (!trackUris || trackUris.length === 0) return;
+
+  const SPOTIFY_MAX_URIS_PER_REQUEST = 100;
   const url = `https://api.spotify.com/v1/playlists/${playlistId}/items`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      uris: trackUris
-    })
-  });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Failed to add tracks to playlist: ${response.statusText} - ${errText}`);
+  // Chunk URIs into batches of 100 (Spotify's per-request limit).
+  // For typical playlists (≤100 tracks), this is exactly 1 API call.
+  for (let i = 0; i < trackUris.length; i += SPOTIFY_MAX_URIS_PER_REQUEST) {
+    const batch = trackUris.slice(i, i + SPOTIFY_MAX_URIS_PER_REQUEST);
+    console.log(`Adding tracks batch ${Math.floor(i / SPOTIFY_MAX_URIS_PER_REQUEST) + 1}: ${batch.length} URIs`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ uris: batch })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Failed to add tracks to playlist (batch starting at index ${i}): ${response.statusText} - ${errText}`);
+    }
+
+    await response.json();
   }
-
-  return await response.json();
 }
 
 /**
@@ -865,6 +1055,17 @@ export async function searchTrackByDetails(token, title, artist) {
     };
   }
 
+  const normalizedKey = `${artist.toLowerCase().trim()} - ${title.toLowerCase().trim()}`;
+  const cachedTrack = searchCache.get(normalizedKey);
+  if (cachedTrack !== undefined && cachedTrack !== null) {
+    console.log(`[Cache Hit] Resolved track: "${title}" by "${artist}"`);
+    return cachedTrack;
+  }
+  if (cachedTrack === null) {
+    console.log(`[Cache Hit - Negative] No track found previously for: "${title}" by "${artist}"`);
+    return null;
+  }
+
   // Construct structured query like: track:"Title" artist:"Artist"
   const query = `track:"${title}" artist:"${artist}"`;
   const url = `https://api.spotify.com/v1/search?${new URLSearchParams({
@@ -884,7 +1085,9 @@ export async function searchTrackByDetails(token, title, artist) {
       const data = await response.json();
       const items = data.tracks?.items || [];
       if (items.length > 0) {
-        return items[0];
+        const track = items[0];
+        searchCache.set(normalizedKey, track);
+        return track;
       }
       
       // Fallback: search more generally if exact track/artist query fails
@@ -903,14 +1106,25 @@ export async function searchTrackByDetails(token, title, artist) {
         const fallbackData = await fallbackResponse.json();
         const fallbackItems = fallbackData.tracks?.items || [];
         if (fallbackItems.length > 0) {
-          return fallbackItems[0];
+          const track = fallbackItems[0];
+          searchCache.set(normalizedKey, track);
+          return track;
         }
       }
     }
   } catch (err) {
     console.warn(`Failed to search track "${title}" by "${artist}":`, err);
   }
+  
+  searchCache.set(normalizedKey, null);
   return null;
+}
+
+export function getRateLimitResetTime() {
+  if (isRateLimited && Date.now() < rateLimitResetTime) {
+    return rateLimitResetTime;
+  }
+  return 0;
 }
 
 

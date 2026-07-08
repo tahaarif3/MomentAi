@@ -8,6 +8,9 @@ import { parsePlaylistImage } from '../services/geminiService.js';
 import * as spotify from '../clients/spotifyClient.js';
 import { getAuthUserId } from '../utils/session.js';
 import { uploadFile } from '../services/storageService.js';
+import { playlistQueue, connection } from '../config/queue.js';
+import { processPlaylistJob } from '../workers/playlistWorker.js';
+import { QueueEvents } from 'bullmq';
 
 const router = express.Router();
 
@@ -132,121 +135,44 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
   try {
     // 1. Ingestion: Read file buffer to send to Gemini
     const fileBuffer = await fs.promises.readFile(filePath);
+    const fileBufferBase64 = fileBuffer.toString('base64');
 
-    // 2. Spotify Match Setup: Always use Client Credentials for catalog searches
+    // 2. Upload file to storage provider (S3/R2 or local fallback) immediately (fast path)
+    console.log("Uploading file to storage provider...");
+    const webImagePath = await uploadFile(filePath, mimeType);
+    console.log(`File uploaded successfully. Web URL/Path: ${webImagePath}`);
+
+    // Cleanup local temp file
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    // 3. Spotify Match Setup
     console.log("Using client credentials token for Spotify catalog search.");
     const spotifyToken = await spotify.getClientCredentialsToken();
 
-    // Retrieve historical tracks to prevent repeat recommendations (only for logged-in users)
-    const excludedSongs = [];
+    // Retrieve past playlist IDs for repeat check (worker will resolve tracks)
+    const pastPlaylistIds = [];
     if (userId) {
       try {
         const pastGenerations = await db.generation.findMany({
           where: { user_id: userId, NOT: { playlist_id: null } },
           take: 3,
-          orderBy: { created_at: 'desc' }
+          orderBy: { created_at: 'desc' },
+          select: { playlist_id: true }
         });
-        
-        console.log(`Checking ${pastGenerations.length} past playlists for repeat recommendations...`);
-        const results = [];
         for (const gen of pastGenerations) {
-          try {
-            const tracks = await spotify.getPlaylistTracks(spotifyToken, gen.playlist_id);
-            if (tracks) {
-              results.push(tracks);
-            }
-          } catch (err) {
-            console.warn(`Failed to fetch tracks for past playlist ${gen.playlist_id}:`, err);
-          }
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        for (const tracks of results) {
-          for (const track of tracks) {
-            if (track && track.name) {
-              excludedSongs.push(`${track.name} by ${track.artists?.[0]?.name || ''}`);
-            }
+          if (gen.playlist_id) {
+            pastPlaylistIds.push(gen.playlist_id);
           }
         }
       } catch (dbErr) {
-        console.warn("Failed to retrieve historical tracks for repeat check:", dbErr);
+        console.warn("Failed to retrieve past generation IDs:", dbErr);
       }
     }
 
-    const customPrompt = req.body.customPrompt || '';
-
-    // 3. LLM Parsing: Extract visual/emotional cues and Spotify metrics
-    console.log("Analyzing image with Gemini Flash...");
-    const metadata = await parsePlaylistImage(fileBuffer, mimeType, customPrompt, req.file.originalname, excludedSongs.slice(0, 50));
-    console.log("Gemini parsed metadata:", JSON.stringify(metadata, null, 2));
-
-    // 4. Upload file to storage provider (S3/R2 or local fallback)
-    console.log("Uploading file to storage provider...");
-    const webImagePath = await uploadFile(filePath, mimeType);
-    console.log(`File uploaded successfully. Web URL/Path: ${webImagePath}`);
-
-    const recommendedSongs = metadata.recommendedSongs || [];
-    console.log(`AI recommended ${recommendedSongs.length} tracks - resolving on Spotify...`);
-
-    // Fetch details for each recommended track sequentially with a 150ms sleep step to protect rate limits
-    const searchResults = [];
-    for (const song of recommendedSongs) {
-      try {
-        const track = await spotify.searchTrackByDetails(spotifyToken, song.title, song.artist);
-        if (track) {
-          searchResults.push(track);
-        }
-      } catch (err) {
-        console.warn(`Failed to resolve track "${song.title}" by "${song.artist}" on Spotify:`, err);
-      }
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
-
-    let finalTracks = searchResults;
-
-    // Deduplicate final track list to guarantee 100% uniqueness by normalized title and artist
-    // and filter out repeat recommendations from past playlists
-    const seenTitles = new Set();
-    const pastTitles = new Set(excludedSongs.map(s => {
-      const parts = s.split(' by ');
-      const title = parts[0].toLowerCase().replace(/\s*[\(\[-].*$/g, '').trim();
-      const artist = parts[1]?.toLowerCase() || '';
-      return `${title} - ${artist}`;
-    }));
-
-    finalTracks = finalTracks.filter(track => {
-      if (!track || !track.id) return false;
-      const cleanTitle = track.name.toLowerCase().replace(/\s*[\(\[-].*$/g, '').trim();
-      const artistName = track.artists?.[0]?.name?.toLowerCase() || '';
-      const uniqueKey = `${cleanTitle} - ${artistName}`;
-      
-      if (seenTitles.has(uniqueKey) || pastTitles.has(uniqueKey)) {
-        return false;
-      }
-      seenTitles.add(uniqueKey);
-      return true;
-    });
-
-    // Failsafe backup: If no songs resolved from Gemini's specific list (e.g. Spotify search lookup failures),
-    // fall back to popular tracks for the seed genres directly from Spotify's catalog.
-    if (finalTracks.length === 0) {
-      console.warn("Spotify failed to resolve any of Gemini's specific recommendations. Running backup genre-based recommendation...");
-      try {
-        const backupPool = await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, []);
-        if (backupPool.length > 0) {
-          const splitIndex = Math.ceil(backupPool.length / 2);
-          finalTracks = backupPool.slice(0, splitIndex);
-        }
-      } catch (backupErr) {
-        console.error("Failsafe backup recommendation also failed:", backupErr);
-      }
-    }
-
-    let generationId = crypto.randomUUID();
-
-    // 5. Token deduction and history logging (only if user is logged in)
+    // 4. Token deduction (only if logged in) - Done early to prevent double-spending
     if (userId) {
-      // Deduct 1 token if user is on Free tier
       const user = await db.user.findUnique({ where: { id: userId } });
       if (user && user.tier === 'free') {
         await db.user.update({
@@ -254,49 +180,135 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
           data: { tokens: { decrement: 1 } }
         });
       }
-
-      // Save generation logs
-      await db.generation.create({
-        data: {
-          id: generationId,
-          user_id: userId,
-          image_path: webImagePath,
-          dominant_colors: JSON.stringify(metadata.dominantColorPalette),
-          environmental_context: metadata.environmentalContext,
-          emotional_vibe: metadata.emotionalVibe,
-          seed_genres: JSON.stringify(metadata.seedGenres),
-          valence: metadata.valence,
-          energy: metadata.energy,
-          acousticness: metadata.acousticness
-        }
-      });
     }
 
-    // Determine if user is authenticated to decide what track data to expose
-    const isAuthenticated = !!userId;
+    const jobData = {
+      fileBufferBase64,
+      mimeType,
+      fileName: req.file.originalname,
+      customPrompt: req.body.customPrompt || '',
+      userId,
+      spotifyToken,
+      webImagePath,
+      pastPlaylistIds
+    };
 
-    res.json({
+    // ─── Test Mode: Run Synchronously ──────────────────────────────────────────
+    if (process.env.NODE_ENV === 'test') {
+      console.log("[TEST] Running playlist generation synchronously...");
+      const result = await processPlaylistJob(jobData);
+      return res.json(result);
+    }
+
+    // ─── Production Mode: Queue Asynchronously ─────────────────────────────────
+    console.log("Enqueuing playlist generation job...");
+    const job = await playlistQueue.add('playlist-generation', jobData);
+    
+    return res.status(202).json({
       success: true,
-      generationId: userId ? generationId : null,
-      imagePath: webImagePath,
-      metadata: metadata,
-      isAuthenticated: isAuthenticated,
-      tracks: finalTracks,
-      suggestedTracks: await fetchSupplementaryTracks(
-        spotifyToken,
-        metadata,
-        customPrompt,
-        finalTracks
-      )
+      jobId: job.id,
+      message: 'Playlist generation started.'
     });
 
   } catch (error) {
     console.error("Error in process-image route:", error);
-    // Cleanup the uploaded file in case of failure and if it hasn't been uploaded & deleted yet
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Route: GET /api/playlist/job/:jobId/stream
+ * Server-Sent Events (SSE) endpoint to stream playlist generation progress.
+ */
+router.get('/job/:jobId/stream', async (req, res) => {
+  const { jobId } = req.params;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // If client disconnected early
+  let isClosed = false;
+
+  const cleanup = () => {
+    if (isClosed) return;
+    isClosed = true;
+    queueEvents.off('progress', onProgress);
+    queueEvents.off('completed', onCompleted);
+    queueEvents.off('failed', onFailed);
+    queueEvents.off('delayed', onDelayed);
+    queueEvents.close().catch(() => {});
+    res.end();
+  };
+
+  req.on('close', cleanup);
+
+  // Initialize QueueEvents listener
+  const queueEvents = new QueueEvents('playlist-generation', { connection });
+
+  queueEvents.on('error', (err) => {
+    console.error(`[SSE Stream] QueueEvents Error for job ${jobId}:`, err);
+  });
+
+  const onProgress = ({ jobId: id, data }) => {
+    if (id === jobId && !isClosed) {
+      res.write(`event: progress\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  const onCompleted = ({ jobId: id, returnvalue }) => {
+    if (id === jobId && !isClosed) {
+      res.write(`event: completed\ndata: ${returnvalue}\n\n`);
+      cleanup();
+    }
+  };
+
+  const onFailed = ({ jobId: id, failedReason }) => {
+    if (id === jobId && !isClosed) {
+      res.write(`event: failed\ndata: ${JSON.stringify({ message: failedReason })}\n\n`);
+      cleanup();
+    }
+  };
+
+  const onDelayed = ({ jobId: id }) => {
+    if (id === jobId && !isClosed) {
+      res.write(`event: retrying\ndata: ${JSON.stringify({ message: 'Spotify is busy, retrying...' })}\n\n`);
+    }
+  };
+
+  // Check current job status to prevent race conditions (in case job is already finished/failed)
+  try {
+    const job = await playlistQueue.getJob(jobId);
+    if (!job) {
+      res.write(`event: failed\ndata: ${JSON.stringify({ message: 'Job not found' })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const state = await job.getState();
+    if (state === 'completed') {
+      res.write(`event: completed\ndata: ${JSON.stringify(job.returnvalue)}\n\n`);
+      res.end();
+      return;
+    } else if (state === 'failed') {
+      res.write(`event: failed\ndata: ${JSON.stringify({ message: job.failedReason || 'Job failed' })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Otherwise, subscribe to live events
+    queueEvents.on('progress', onProgress);
+    queueEvents.on('completed', onCompleted);
+    queueEvents.on('failed', onFailed);
+    queueEvents.on('delayed', onDelayed);
+  } catch (err) {
+    console.error(`[SSE Stream] Error fetching job state for ${jobId}:`, err);
+    res.write(`event: failed\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
+    res.end();
   }
 });
 

@@ -131,8 +131,52 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`===============================================`);
   console.log(` MomentAI running on port ${PORT}`);
   console.log(`===============================================`);
 });
+
+// Import worker to start listening to the queue (only starts if process.env.NODE_ENV !== 'test')
+import './workers/playlistWorker.js';
+
+// Graceful shutdown helper
+const gracefulShutdown = async (signal) => {
+  console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);
+  
+  server.close(() => {
+    console.log('[Server] HTTP server closed.');
+  });
+
+  try {
+    await db.$disconnect();
+    console.log('[Prisma] Database disconnected.');
+  } catch (err) {
+    console.error('[Prisma] Error disconnecting database:', err);
+  }
+
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      const { worker } = await import('./workers/playlistWorker.js');
+      if (worker) {
+        await worker.close();
+        console.log('[Worker] Worker closed.');
+      }
+    } catch (err) {
+      console.error('[Worker] Error closing worker:', err);
+    }
+
+    try {
+      const { connection } = await import('./config/queue.js');
+      await connection.quit();
+      console.log('[Redis] Connection closed.');
+    } catch (err) {
+      console.error('[Redis] Error closing Redis connection:', err);
+    }
+  }
+
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

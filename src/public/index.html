@@ -78,6 +78,37 @@
     .footer-link:hover {
       color: #4361ee !important;
     }
+
+    /* Error Modal styling */
+    .error-icon-badge {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #e63946, #d62828);
+      color: #fff;
+      font-size: 2.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.25rem;
+      box-shadow: 0 8px 24px rgba(230, 57, 70, 0.4);
+      animation: errorBadgePulse 2s infinite ease-in-out;
+    }
+    
+    @keyframes errorBadgePulse {
+      0% {
+        transform: scale(1);
+        box-shadow: 0 8px 24px rgba(230, 57, 70, 0.4);
+      }
+      50% {
+        transform: scale(1.05);
+        box-shadow: 0 8px 32px rgba(230, 57, 70, 0.6);
+      }
+      100% {
+        transform: scale(1);
+        box-shadow: 0 8px 24px rgba(230, 57, 70, 0.4);
+      }
+    }
   </style>
 </head>
 <body class="dark-theme">
@@ -191,7 +222,7 @@
               <div class="analysis-overlay hidden" id="analysisLoader">
                 <div class="scan-bar"></div>
                 <div class="spinner"></div>
-                <p>Analyzing visual energy...</p>
+                <p id="loaderProgressText">Analyzing visual energy...</p>
               </div>
             </div>
           </div>
@@ -411,6 +442,21 @@
         <div class="modal-actions success-actions">
           <button class="btn btn-secondary" id="btnSuccessCloseAction">Close</button>
           <a class="btn btn-success" id="linkOpenSpotify" href="#" target="_blank">Open in Spotify</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Friendly Error Modal -->
+    <div class="modal-backdrop animate-modal hidden" id="errorModal">
+      <div class="modal-content glass-card error-modal-content" style="max-width: 420px; text-align: center;">
+        <button class="modal-close" id="btnErrorClose">&times;</button>
+        <div class="error-icon-badge" id="errorIconBadge">⚠️</div>
+        <h2 id="errorTitle">Something went wrong</h2>
+        <p class="modal-subtitle" id="errorMessage" style="margin-bottom: 1.5rem;">We hit a snag generating your playlist. Please try again.</p>
+        
+        <div class="modal-actions error-actions" style="display: flex; justify-content: center; gap: 1rem;">
+          <button class="btn btn-secondary" id="btnErrorDismiss">Close</button>
+          <button class="btn btn-primary" id="btnErrorRetry" style="background: #e63946; border-color: #e63946;">Try Again</button>
         </div>
       </div>
     </div>

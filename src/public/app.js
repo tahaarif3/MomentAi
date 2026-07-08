@@ -129,6 +129,15 @@ const metricMood = document.getElementById('metricMood');
 const colorSwatches = document.getElementById('colorSwatches');
 const genresLabel = document.getElementById('genresLabel');
 
+// Error Modal elements
+const errorModal = document.getElementById('errorModal');
+const errorTitle = document.getElementById('errorTitle');
+const errorMessage = document.getElementById('errorMessage');
+const errorIconBadge = document.getElementById('errorIconBadge');
+const btnErrorRetry = document.getElementById('btnErrorRetry');
+const btnErrorDismiss = document.getElementById('btnErrorDismiss');
+const btnErrorClose = document.getElementById('btnErrorClose');
+
 function updateChromeState(isPreview) {
   document.querySelectorAll('.landing-only').forEach((el) => {
     el.classList.toggle('hidden', isPreview);
@@ -312,6 +321,57 @@ function setupEventListeners() {
   btnTokenClose.addEventListener('click', () => toggleModal(tokenModal, false));
   btnBuyTokens.addEventListener('click', purchaseTokens);
   btnBuyPremium.addEventListener('click', upgradePremium);
+
+  // Friendly Error Modal Event Listeners
+  let activeRetryCallback = null;
+
+  window.showErrorScreen = function(title, msg, type = 'generic', retryCallback = null) {
+    errorTitle.textContent = title;
+    errorMessage.textContent = msg;
+
+    if (type === 'rate-limit') {
+      errorIconBadge.textContent = '⏳';
+      errorIconBadge.style.background = 'linear-gradient(135deg, #f39c12, #d35400)';
+      errorIconBadge.style.boxShadow = '0 8px 24px rgba(243, 156, 18, 0.4)';
+    } else if (type === 'auth') {
+      errorIconBadge.textContent = '🔑';
+      errorIconBadge.style.background = 'linear-gradient(135deg, #3498db, #2980b9)';
+      errorIconBadge.style.boxShadow = '0 8px 24px rgba(52, 152, 219, 0.4)';
+    } else if (type === 'network') {
+      errorIconBadge.textContent = '📡';
+      errorIconBadge.style.background = 'linear-gradient(135deg, #7f8c8d, #2c3e50)';
+      errorIconBadge.style.boxShadow = '0 8px 24px rgba(127, 140, 141, 0.4)';
+    } else if (type === 'tokens') {
+      errorIconBadge.textContent = '🎟️';
+      errorIconBadge.style.background = 'linear-gradient(135deg, #9b59b6, #8e44ad)';
+      errorIconBadge.style.boxShadow = '0 8px 24px rgba(155, 89, 182, 0.4)';
+    } else {
+      errorIconBadge.textContent = '⚠️';
+      errorIconBadge.style.background = 'linear-gradient(135deg, #e63946, #d62828)';
+      errorIconBadge.style.boxShadow = '0 8px 24px rgba(230, 57, 70, 0.4)';
+    }
+
+    if (retryCallback) {
+      btnErrorRetry.classList.remove('hidden');
+      activeRetryCallback = retryCallback;
+    } else {
+      btnErrorRetry.classList.add('hidden');
+      activeRetryCallback = null;
+    }
+
+    toggleModal(errorModal, true);
+  };
+
+  if (btnErrorDismiss) btnErrorDismiss.addEventListener('click', () => toggleModal(errorModal, false));
+  if (btnErrorClose) btnErrorClose.addEventListener('click', () => toggleModal(errorModal, false));
+  if (btnErrorRetry) {
+    btnErrorRetry.addEventListener('click', () => {
+      toggleModal(errorModal, false);
+      if (activeRetryCallback) {
+        activeRetryCallback();
+      }
+    });
+  }
 }
 
 // Initialize Supabase Auth and check for existing session
@@ -798,7 +858,7 @@ async function importPlaylistFromUrl() {
 
   } catch (error) {
     console.error("Import failure:", error);
-    alert(error.message);
+    showErrorScreen("Import Failed", error.message, 'generic', () => importPlaylistFromUrl());
   } finally {
     btnImportPlaylist.disabled = false;
     btnImportPlaylist.textContent = "📥 Import Playlist";
@@ -815,6 +875,11 @@ async function uploadAndProcessImage(file) {
     formData.append('customPrompt', customPromptInput.value.trim());
   }
 
+  const loaderProgressText = document.getElementById('loaderProgressText');
+  if (loaderProgressText) {
+    loaderProgressText.textContent = "Uploading image...";
+  }
+
   try {
     const res = await apiFetch('/api/playlist/process', {
       method: 'POST',
@@ -825,44 +890,136 @@ async function uploadAndProcessImage(file) {
       const errData = await res.json();
       if (res.status === 403) {
         await toggleModal(tokenModal, true);
+        throw new Error("You are out of tokens.");
       }
-      throw new Error(errData.message || "Failed to process image.");
+      throw new Error(errData.message || "Failed to start image processing.");
     }
 
-    const result = await res.json();
-    currentGeneration.id = result.generationId;
-    currentGeneration.imagePath = result.imagePath;
-    currentGeneration.metadata = result.metadata;
-    currentGeneration.tracks = result.tracks;
-    currentGeneration.suggestedTracks = result.suggestedTracks || [];
-    currentGeneration.customPrompt = customPromptInput?.value.trim() || '';
+    const data = await res.json();
 
-    // Refresh user tokens if logged in
-    if (authState.loggedIn) {
-      checkAuth();
-    }
-
-    // Render results
-    renderAnalysisResults(result.metadata);
-    refreshPlaylistEditor();
-
-    // Always show Save to Spotify
-    showPreviewCtas();
-    btnSavePlaylist.textContent = "Save Playlist to Spotify";
-    btnSavePlaylist.disabled = false;
-
-    if (!authState.loggedIn) {
-      playlistStatusText.textContent = "Sign in to see all tracks and save to Spotify";
+    if (data.jobId) {
+      console.log(`Job queued successfully with ID: ${data.jobId}`);
+      await connectToJobStream(data.jobId, file);
+    } else {
+      console.log("Direct processing result returned.");
+      handleProcessingSuccess(data);
     }
 
   } catch (error) {
     console.error("Pipeline failure:", error);
-    alert(error.message);
+    if (error.message !== "You are out of tokens.") {
+      showErrorScreen("Generation Failed", error.message, 'generic', () => uploadAndProcessImage(file));
+    }
     await resetUploader();
   } finally {
     analysisLoader.classList.add('hidden');
     setButtonLoading(btnGeneratePlaylist, false);
   }
+}
+
+function handleProcessingSuccess(result) {
+  currentGeneration.id = result.generationId;
+  currentGeneration.imagePath = result.imagePath;
+  currentGeneration.metadata = result.metadata;
+  currentGeneration.tracks = result.tracks;
+  currentGeneration.suggestedTracks = result.suggestedTracks || [];
+  
+  const customPromptInput = document.getElementById('customTextPrompt');
+  currentGeneration.customPrompt = customPromptInput?.value.trim() || '';
+
+  // Refresh user tokens if logged in
+  if (authState.loggedIn) {
+    checkAuth();
+  }
+
+  // Render results
+  renderAnalysisResults(result.metadata);
+  refreshPlaylistEditor();
+
+  // Always show Save to Spotify
+  showPreviewCtas();
+  btnSavePlaylist.textContent = "Save Playlist to Spotify";
+  btnSavePlaylist.disabled = false;
+
+  if (!authState.loggedIn) {
+    playlistStatusText.textContent = "Sign in to see all tracks and save to Spotify";
+  }
+}
+
+function connectToJobStream(jobId, file) {
+  return new Promise((resolve, reject) => {
+    const loaderProgressText = document.getElementById('loaderProgressText');
+    const streamUrl = `/api/playlist/job/${jobId}/stream`;
+    const eventSource = new EventSource(streamUrl);
+
+    eventSource.addEventListener('progress', (e) => {
+      try {
+        const progress = JSON.parse(e.data);
+        console.log(`[Job Progress] ${progress.stage}: ${progress.message}`);
+        if (loaderProgressText) {
+          loaderProgressText.textContent = progress.message;
+        }
+      } catch (err) {
+        console.error("Failed to parse progress data:", err);
+      }
+    });
+
+    eventSource.addEventListener('retrying', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.warn(`[Job Rate Limited] Retrying: ${data.message}`);
+        if (loaderProgressText) {
+          loaderProgressText.textContent = "Spotify is overloaded. Retrying automatically...";
+        }
+      } catch (err) {
+        console.error("Failed to parse retry data:", err);
+      }
+    });
+
+    eventSource.addEventListener('completed', (e) => {
+      try {
+        const result = JSON.parse(e.data);
+        console.log("[Job Completed] Rendering playlist...");
+        eventSource.close();
+        handleProcessingSuccess(result);
+        resolve();
+      } catch (err) {
+        console.error("Failed to parse completion data:", err);
+        eventSource.close();
+        reject(new Error("Failed to read completed playlist data."));
+      }
+    });
+
+    eventSource.addEventListener('failed', (e) => {
+      try {
+        const errData = JSON.parse(e.data);
+        console.error("[Job Failed] Message:", errData.message);
+        eventSource.close();
+        
+        let type = 'generic';
+        let errorTitle = 'Generation Failed';
+        let userMsg = errData.message || 'An error occurred during playlist generation.';
+
+        if (userMsg.includes('overloaded') || userMsg.includes('rate limit') || userMsg.includes('RATE_LIMIT_ACTIVE')) {
+          type = 'rate-limit';
+          errorTitle = 'High Demand';
+          userMsg = 'The music recommendation engine is temporarily overloaded due to high demand. Please try again in a few seconds.';
+        }
+
+        showErrorScreen(errorTitle, userMsg, type, () => uploadAndProcessImage(file));
+        reject(new Error(userMsg));
+      } catch (err) {
+        eventSource.close();
+        reject(new Error("Job failed with an unknown error."));
+      }
+    });
+
+    eventSource.onerror = (err) => {
+      console.error("[EventSource Error]", err);
+      eventSource.close();
+      reject(new Error("Loss of connection to generation server. Please try again."));
+    };
+  });
 }
 
 // Render Gemini visual metadata outputs
@@ -1415,7 +1572,7 @@ async function confirmSavePlaylistToSpotify() {
 
   } catch (error) {
     console.error("Save failed:", error);
-    alert(error.message);
+    showErrorScreen("Export Failed", error.message, 'generic', () => confirmSavePlaylistToSpotify());
     setButtonLoading(btnSavePlaylist, false);
     btnSavePlaylist.textContent = "Save Playlist to Spotify";
   }
