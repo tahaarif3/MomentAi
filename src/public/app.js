@@ -187,24 +187,14 @@ function setupEventListeners() {
   }
 
   // Drag and drop events
-  dropZone.addEventListener('click', (e) => {
-    if (!authState.loggedIn) {
-      e.preventDefault();
-      openAuthModal('signup');
-    } else {
-      fileInput.click();
-    }
+  dropZone.addEventListener('click', () => {
+    fileInput.click();
   });
   fileInput.addEventListener('change', handleFileSelect);
 
   if (btnUploadMoment) {
-    btnUploadMoment.addEventListener('click', (e) => {
-      if (!authState.loggedIn) {
-        e.preventDefault();
-        openAuthModal('signup');
-      } else {
-        fileInput.click();
-      }
+    btnUploadMoment.addEventListener('click', () => {
+      fileInput.click();
     });
   }
 
@@ -228,10 +218,6 @@ function setupEventListeners() {
   dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('dragover');
-    if (!authState.loggedIn) {
-      openAuthModal('signup');
-      return;
-    }
     if (e.dataTransfer.files.length > 0) {
       processSelectedFile(e.dataTransfer.files[0]);
     }
@@ -682,14 +668,10 @@ function handleFileSelect(e) {
 }
 
 function processSelectedFile(file) {
-  if (!authState.loggedIn) {
-    openAuthModal('signup');
-    return;
-  }
   // Validate type
   const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
   if (!validTypes.includes(file.type)) {
-    alert("Invalid file format. Please upload JPEG, PNG or WebP.");
+    showErrorScreen("Invalid File Format", "Please upload a JPEG, PNG or WebP image.", 'generic');
     return;
   }
 
