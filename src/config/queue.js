@@ -11,27 +11,31 @@ export const redisConnectionOpts = {
   maxRetriesPerRequest: null, // Critical requirement for BullMQ
 };
 
-// Create a connection instance for ioredis
-export const connection = new Redis(redisUrl, redisConnectionOpts);
+// Lazily/conditionally initialize Redis and Queue to prevent connection attempts in test mode
+export let connection = null;
+export let playlistQueue = null;
 
-connection.on('error', (err) => {
-  console.error('[Redis] Connection Error:', err);
-});
+if (process.env.NODE_ENV !== 'test') {
+  connection = new Redis(redisUrl, redisConnectionOpts);
 
-connection.on('connect', () => {
-  console.log('[Redis] Connected successfully');
-});
+  connection.on('error', (err) => {
+    console.error('[Redis] Connection Error:', err.message);
+  });
 
-// Create the playlist queue
-export const playlistQueue = new Queue('playlist-generation', {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000 // Retry after 2s, then 4s, then 8s
-    },
-    removeOnComplete: true, // Clean up completed jobs from Redis
-    removeOnFail: false // Keep failed jobs for inspection/retry
-  }
-});
+  connection.on('connect', () => {
+    console.log('[Redis] Connected successfully');
+  });
+
+  playlistQueue = new Queue('playlist-generation', {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000 // Retry after 2s, then 4s, then 8s
+      },
+      removeOnComplete: true, // Clean up completed jobs from Redis
+      removeOnFail: false // Keep failed jobs for inspection/retry
+    }
+  });
+}
