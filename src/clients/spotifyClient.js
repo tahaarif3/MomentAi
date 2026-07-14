@@ -85,12 +85,16 @@ class SimpleMemoryCache {
     this.cache = new Map();
   }
 
+  /**
+   * @returns {*|undefined} Cached value, or `undefined` on miss/expiry.
+   * Callers may intentionally store `null` for negative hits — that is distinct from a miss.
+   */
   get(key) {
     const item = this.cache.get(key);
-    if (!item) return null;
+    if (item === undefined) return undefined;
     if (Date.now() > item.expiresAt) {
       this.cache.delete(key);
-      return null;
+      return undefined;
     }
     return item.value;
   }
@@ -104,6 +108,14 @@ class SimpleMemoryCache {
       value,
       expiresAt: Date.now() + this.ttlMs
     });
+  }
+
+  delete(key) {
+    this.cache.delete(key);
+  }
+
+  clear() {
+    this.cache.clear();
   }
 }
 
@@ -476,6 +488,32 @@ export async function getRecommendations(token, seedGenres, targetValence, targe
  * Fallback recommendation generator using Spotify Search API.
  * Searches for tracks matching the specified genres and blends them.
  */
+const ATMOSPHERE_CHIP_PROMPTS = new Set([
+  'golden hour',
+  'rainy commute',
+  'night drive',
+  'sunday reset',
+  'deep focus'
+]);
+
+/**
+ * Mood chips / scenic phrases belong in Gemini guidance, not Spotify's search q=.
+ * Keep only prompts that look like musical style / genre steering.
+ */
+function sanitizePromptForSpotifySearch(customPrompt = '') {
+  const raw = customPrompt.trim();
+  if (!raw) return '';
+
+  const parts = raw.split(/[,/|]+/).map((p) => p.trim()).filter(Boolean);
+  const allAtmosphere = parts.length > 0 && parts.every((p) => ATMOSPHERE_CHIP_PROMPTS.has(p.toLowerCase()));
+  if (allAtmosphere) return '';
+
+  // Long vignette text rarely matches catalog search — prefer genre+vibe instead
+  if (raw.length > 80 || raw.split(/\s+/).length > 12) return '';
+
+  return raw;
+}
+
 export async function getRecommendationsFallback(token, seedGenres, customPrompt = '', emotionalVibe = '') {
   if (process.env.NODE_ENV === 'test') {
     console.log("[TEST] Mocking Spotify recommendations fallback...");
@@ -511,7 +549,14 @@ export async function getRecommendationsFallback(token, seedGenres, customPrompt
     seedGenres = ['pop', 'indie', 'electronic'];
   }
 
-  const cleanCustomPrompt = customPrompt && customPrompt.trim().length > 0 ? customPrompt.trim() : '';
+  const cleanCustomPrompt = sanitizePromptForSpotifySearch(customPrompt);
+  // Keep vibe short — Spotify search degrades with long natural-language sentences
+  const vibeTokens = (emotionalVibe || '')
+    .split(/[,.;]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' ');
 
   const tracksPool = [];
   const seenTrackIds = new Set();
@@ -527,13 +572,12 @@ export async function getRecommendationsFallback(token, seedGenres, customPrompt
         let query = '';
         if (genre === 'indian') {
           // 'indian' isn't supported by Spotify search genre filter, map to desi/bollywood keywords
-          const vibe = emotionalVibe ? emotionalVibe.trim() : 'wedding celebration';
+          const vibe = vibeTokens || 'wedding celebration';
           query = `bollywood desi hindi punjabi ${vibe}`;
         } else {
-          // Blend genre with emotional vibe to make search dynamic and unique per image
-          const blend = emotionalVibe ? ` ${emotionalVibe.trim()}` : '';
-          query = cleanCustomPrompt 
-            ? `genre:"${genre}" ${cleanCustomPrompt}${blend}` 
+          const blend = vibeTokens ? ` ${vibeTokens}` : '';
+          query = cleanCustomPrompt
+            ? `genre:"${genre}" ${cleanCustomPrompt}${blend}`
             : `genre:"${genre}"${blend}`;
         }
 
@@ -556,9 +600,9 @@ export async function getRecommendationsFallback(token, seedGenres, customPrompt
 
           // Fallback if combined query yields 0 results and customPrompt was present
           if (items.length === 0 && cleanCustomPrompt) {
-            console.warn(`Combined search (genre:"${genre}" + customPrompt:"${cleanCustomPrompt}") returned 0 results. Trying query: "${cleanCustomPrompt}"...`);
+            console.warn(`Combined search (genre:"${genre}" + customPrompt:"${cleanCustomPrompt}") returned 0 results. Trying genre-only...`);
             const fallbackUrl = `https://api.spotify.com/v1/search?${new URLSearchParams({
-              q: cleanCustomPrompt,
+              q: `genre:"${genre}"`,
               type: 'track',
               limit: '10',
               offset: (page * 10 + randomOffset).toString()
@@ -605,11 +649,10 @@ export async function getRecommendationsFallback(token, seedGenres, customPrompt
         try {
           let query = '';
           if (genre === 'indian') {
-            query = `bollywood desi hindi punjabi ${emotionalVibe || 'party'}`;
+            query = `bollywood desi hindi punjabi ${vibeTokens || 'party'}`;
           } else {
-            const blend = emotionalVibe ? ` ${emotionalVibe.trim()}` : '';
-            query = cleanCustomPrompt || genre;
-            query = `${query}${blend}`;
+            query = genre;
+            if (vibeTokens) query = `${query} ${vibeTokens}`;
           }
 
           const url = `https://api.spotify.com/v1/search?${new URLSearchParams({
@@ -1087,13 +1130,13 @@ export async function searchTrackByDetails(token, title, artist) {
 
   const normalizedKey = `${artist.toLowerCase().trim()} - ${title.toLowerCase().trim()}`;
   const cachedTrack = searchCache.get(normalizedKey);
-  if (cachedTrack !== undefined && cachedTrack !== null) {
+  if (cachedTrack !== undefined) {
+    if (cachedTrack === null) {
+      console.log(`[Cache Hit - Negative] No track found previously for: "${title}" by "${artist}"`);
+      return null;
+    }
     console.log(`[Cache Hit] Resolved track: "${title}" by "${artist}"`);
     return cachedTrack;
-  }
-  if (cachedTrack === null) {
-    console.log(`[Cache Hit - Negative] No track found previously for: "${title}" by "${artist}"`);
-    return null;
   }
 
   // Construct structured query like: track:"Title" artist:"Artist"
@@ -1111,43 +1154,52 @@ export async function searchTrackByDetails(token, title, artist) {
       }
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      const items = data.tracks?.items || [];
-      if (items.length > 0) {
-        const track = items[0];
-        searchCache.set(normalizedKey, track);
-        return track;
-      }
-      
-      // Fallback: search more generally if exact track/artist query fails
-      const fallbackQuery = `${title} ${artist}`;
-      const fallbackUrl = `https://api.spotify.com/v1/search?${new URLSearchParams({
-        q: fallbackQuery,
-        type: 'track',
-        limit: '1'
-      }).toString()}`;
-      
-      const fallbackResponse = await fetch(fallbackUrl, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (fallbackResponse.ok) {
-        const fallbackData = await fallbackResponse.json();
-        const fallbackItems = fallbackData.tracks?.items || [];
-        if (fallbackItems.length > 0) {
-          const track = fallbackItems[0];
-          searchCache.set(normalizedKey, track);
-          return track;
-        }
-      }
+    if (!response.ok) {
+      // Auth / rate / server errors must not poison the negative cache
+      console.warn(`Spotify search failed for "${title}" by "${artist}": ${response.status} ${response.statusText}`);
+      return null;
     }
+
+    const data = await response.json();
+    const items = data.tracks?.items || [];
+    if (items.length > 0) {
+      const track = items[0];
+      searchCache.set(normalizedKey, track);
+      return track;
+    }
+
+    // Fallback: search more generally if exact track/artist query fails
+    const fallbackQuery = `${title} ${artist}`;
+    const fallbackUrl = `https://api.spotify.com/v1/search?${new URLSearchParams({
+      q: fallbackQuery,
+      type: 'track',
+      limit: '5'
+    }).toString()}`;
+
+    const fallbackResponse = await fetch(fallbackUrl, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!fallbackResponse.ok) {
+      console.warn(`Spotify fallback search failed for "${title}" by "${artist}": ${fallbackResponse.status}`);
+      return null;
+    }
+
+    const fallbackData = await fallbackResponse.json();
+    const fallbackItems = fallbackData.tracks?.items || [];
+    if (fallbackItems.length > 0) {
+      const track = fallbackItems[0];
+      searchCache.set(normalizedKey, track);
+      return track;
+    }
+
+    // Confirmed empty result from Spotify — cache negative to skip immediate re-tries
+    searchCache.set(normalizedKey, null);
+    return null;
   } catch (err) {
     console.warn(`Failed to search track "${title}" by "${artist}":`, err);
+    return null;
   }
-  
-  searchCache.set(normalizedKey, null);
-  return null;
 }
 
 export function getRateLimitResetTime() {

@@ -106,14 +106,18 @@ export async function transitionToPreview({ grid, landingStack, analysisCard, an
   if (landingStack) await hidePanel(landingStack);
   if (analysisCard) {
     analysisCard.classList.remove('hidden');
+    analysisCard.classList.add('is-analyzing');
+    analysisCard.classList.remove('is-ready');
     await showPanel(analysisCard);
   }
   if (rightPanel) await showPanel(rightPanel);
   if (analysisLoader) {
     if (showLoader) {
       analysisLoader.classList.remove('hidden');
+      analysisLoader.setAttribute('aria-busy', 'true');
     } else {
       analysisLoader.classList.add('hidden');
+      analysisLoader.setAttribute('aria-busy', 'false');
     }
   }
 }
@@ -127,7 +131,10 @@ export async function transitionToLanding({ grid, landingStack, analysisCard, an
   });
 
   if (analysisLoader) analysisLoader.classList.add('hidden');
-  if (analysisCard) await hidePanel(analysisCard);
+  if (analysisCard) {
+    analysisCard.classList.remove('is-analyzing', 'is-ready');
+    await hidePanel(analysisCard);
+  }
   const rightPanel = document.querySelector('.right-panel');
   if (rightPanel) {
     rightPanel.classList.remove('is-visible');

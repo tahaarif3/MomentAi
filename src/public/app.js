@@ -191,6 +191,12 @@ function setupEventListeners() {
   dropZone.addEventListener('click', () => {
     fileInput.click();
   });
+  dropZone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
   fileInput.addEventListener('change', handleFileSelect);
 
   if (btnUploadMoment) {
@@ -202,6 +208,27 @@ function setupEventListeners() {
   if (btnNewPhoto) {
     btnNewPhoto.addEventListener('click', () => resetUploader());
   }
+
+  document.querySelectorAll('.mood-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const prompt = document.getElementById('customTextPrompt');
+      const value = chip.dataset.chip || chip.textContent.trim();
+      const selected = chip.getAttribute('aria-pressed') === 'true';
+      chip.setAttribute('aria-pressed', selected ? 'false' : 'true');
+      chip.classList.toggle('is-selected', !selected);
+      if (!prompt) return;
+      const parts = prompt.value
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (selected) {
+        prompt.value = parts.filter((part) => part.toLowerCase() !== value.toLowerCase()).join(', ');
+      } else if (!parts.some((part) => part.toLowerCase() === value.toLowerCase())) {
+        parts.push(value);
+        prompt.value = parts.join(', ');
+      }
+    });
+  });
 
   dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -603,7 +630,7 @@ function renderUserPanel() {
 
 function renderDisconnectedPanel() {
   userPanel.innerHTML = `
-    <button class="btn btn-primary" id="btnSignIn" type="button" style="border-radius:20px">Sign in</button>
+    <button class="btn btn-light" id="btnSignIn" type="button">Connect Spotify</button>
   `;
   document.getElementById('btnSignIn').addEventListener('click', () => openAuthModal('signin'));
   
@@ -635,10 +662,9 @@ function updatePlaylistBlurState() {
     banner.className = 'blur-signin-banner';
     banner.innerHTML = `
       <div class="blur-banner-content">
-        <span class="blur-banner-icon">🔒</span>
-        <p>Sign in to unlock your generated playlist and save it to Spotify</p>
-        <button class="btn btn-primary btn-sm" id="btnBlurSignIn" type="button" style="border-radius:20px">
-          Sign In / Sign Up
+        <p>Sign in to unlock your playlist and save it to Spotify.</p>
+        <button class="btn btn-primary btn-sm" id="btnBlurSignIn" type="button">
+          Sign in
         </button>
       </div>
     `;
@@ -1037,19 +1063,42 @@ function connectToJobStream(jobId, file) {
 function renderAnalysisResults(metadata) {
   const vibeLabel = metadata.emotionalVibe
     ? metadata.emotionalVibe.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-    : 'Visual Vibe';
+    : 'Warm light, slow pace';
+
+  const energyPct = Math.round(metadata.energy * 100);
+  const energyBand = energyPct < 40 ? 'Low' : energyPct < 70 ? 'Mid' : 'High';
+  const tempoFeel = metadata.acousticness > 0.6 ? '~72 BPM' : metadata.energy > 0.65 ? '~118 BPM' : '~92 BPM';
 
   if (aestheticTitle) {
-    aestheticTitle.textContent = `Aesthetic: ${vibeLabel}`;
+    aestheticTitle.textContent = vibeLabel;
   }
   if (metricEnergy) {
-    metricEnergy.textContent = `⚡ ${Math.round(metadata.energy * 100)}% Neon Energy`;
+    metricEnergy.textContent = `${energyBand} — ${energyPct}%`;
   }
   if (metricMood) {
-    metricMood.textContent = `🌙 ${Math.round((1 - metadata.valence) * 100)}% Midnight Mood`;
+    metricMood.textContent = vibeLabel.split(/[,·]/)[0].trim() || 'Wistful · warm';
+  }
+  const metricTempo = document.getElementById('metricTempo');
+  if (metricTempo) {
+    metricTempo.textContent = tempoFeel;
   }
   if (genresLabel) {
-    genresLabel.textContent = `Genres: ${metadata.seedGenres.join(', ')}`;
+    genresLabel.innerHTML = '';
+    metadata.seedGenres.forEach((genre) => {
+      const chip = document.createElement('span');
+      chip.className = 'genre-chip';
+      chip.textContent = genre;
+      genresLabel.appendChild(chip);
+    });
+  }
+
+  if (analysisCard) {
+    analysisCard.classList.add('is-ready');
+    analysisCard.classList.remove('is-analyzing');
+  }
+  const curationCount = document.getElementById('curationCount');
+  if (curationCount && currentGeneration?.tracks) {
+    curationCount.textContent = `${currentGeneration.tracks.length || 0} tracks`;
   }
 
   if (colorSwatches) {
@@ -1059,6 +1108,7 @@ function renderAnalysisResults(metadata) {
       swatch.className = 'color-swatch';
       swatch.style.backgroundColor = getTagColorHex(color);
       swatch.style.setProperty('--stagger-delay', `${i * 60}ms`);
+      swatch.title = color;
       colorSwatches.appendChild(swatch);
     });
   }
@@ -1106,15 +1156,16 @@ function renderAnalysisResults(metadata) {
 // Helper to determine border accent based on color string
 function getTagColorHex(colorName) {
   const cn = colorName.toLowerCase();
-  if (cn.includes('blue') || cn.includes('neon') || cn.includes('electric')) return '#4361ee';
-  if (cn.includes('purple') || cn.includes('cyber') || cn.includes('magenta')) return '#7209b7';
-  if (cn.includes('pink') || cn.includes('pastel') || cn.includes('glow')) return '#f72585';
-  if (cn.includes('cyan') || cn.includes('turquoise') || cn.includes('ocean')) return '#4cc9f0';
-  if (cn.includes('gold') || cn.includes('yellow') || cn.includes('warm') || cn.includes('sunny')) return '#fbc02d';
-  if (cn.includes('green') || cn.includes('nature')) return '#1db954';
-  if (cn.includes('red') || cn.includes('vintage')) return '#ff4b4b';
-  if (cn.includes('monochrome') || cn.includes('dark') || cn.includes('black')) return '#8e8e9f';
-  return '#4361ee';
+  if (cn.includes('blue') || cn.includes('ocean') || cn.includes('cool')) return '#2b2f3a';
+  if (cn.includes('purple') || cn.includes('violet') || cn.includes('magenta')) return '#5a4a3a';
+  if (cn.includes('pink') || cn.includes('pastel') || cn.includes('rose')) return '#d8b98a';
+  if (cn.includes('cyan') || cn.includes('turquoise')) return '#3a4548';
+  if (cn.includes('gold') || cn.includes('yellow') || cn.includes('warm') || cn.includes('sunny') || cn.includes('amber')) return '#e5a04d';
+  if (cn.includes('orange') || cn.includes('sunset') || cn.includes('copper')) return '#b06a2e';
+  if (cn.includes('green') || cn.includes('nature')) return '#4a5a42';
+  if (cn.includes('red') || cn.includes('vintage')) return '#8a3f32';
+  if (cn.includes('monochrome') || cn.includes('dark') || cn.includes('black')) return '#6b6156';
+  return '#b06a2e';
 }
 
 function getTrackCoverUrl(track) {
@@ -1152,7 +1203,7 @@ function buildTrackCardMarkup(track, index, mode) {
       </div>
       <div class="track-controls">
         <span class="track-duration">${duration}</span>
-        <button type="button" class="btn-play-preview" data-track-id="${escapeHtml(track.id)}" title="Play on Spotify">▶</button>
+        <button type="button" class="btn-play-preview" data-track-id="${escapeHtml(track.id)}" title="Play on Spotify" aria-label="Play ${escapeHtml(track.name)} on Spotify">▶</button>
         ${actionButton}
       </div>
     </div>
