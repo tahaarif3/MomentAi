@@ -225,18 +225,29 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
  */
 router.get('/job/:jobId/stream', async (req, res) => {
   const { jobId } = req.params;
+  const jobIdKey = String(jobId);
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx/proxy buffering
   res.flushHeaders();
 
-  // If client disconnected early
   let isClosed = false;
+  let heartbeatTimer = null;
+  let pollTimer = null;
 
   const cleanup = () => {
     if (isClosed) return;
     isClosed = true;
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
     queueEvents.off('progress', onProgress);
     queueEvents.off('completed', onCompleted);
     queueEvents.off('failed', onFailed);
@@ -247,35 +258,35 @@ router.get('/job/:jobId/stream', async (req, res) => {
 
   req.on('close', cleanup);
 
-  // Initialize QueueEvents listener
   const queueEvents = new QueueEvents('playlist-generation', { connection });
 
   queueEvents.on('error', (err) => {
-    console.error(`[SSE Stream] QueueEvents Error for job ${jobId}:`, err);
+    console.error(`[SSE Stream] QueueEvents Error for job ${jobIdKey}:`, err);
   });
 
+  const matchesJob = (id) => String(id) === jobIdKey;
+
   const onProgress = ({ jobId: id, data }) => {
-    if (id === jobId && !isClosed) {
+    if (matchesJob(id) && !isClosed) {
       res.write(`event: progress\ndata: ${JSON.stringify(data)}\n\n`);
     }
   };
 
   const onCompleted = ({ jobId: id, returnvalue }) => {
-    if (id === jobId && !isClosed) {
-      res.write(`event: completed\ndata: ${returnvalue}\n\n`);
-      cleanup();
-    }
+    if (!matchesJob(id) || isClosed) return;
+    const payload = typeof returnvalue === 'string' ? returnvalue : JSON.stringify(returnvalue ?? {});
+    res.write(`event: completed\ndata: ${payload}\n\n`);
+    cleanup();
   };
 
   const onFailed = async ({ jobId: id, failedReason }) => {
-    if (id !== jobId || isClosed) return;
+    if (!matchesJob(id) || isClosed) return;
 
     try {
-      const job = await playlistQueue.getJob(jobId);
+      const job = await playlistQueue.getJob(jobIdKey);
       if (job) {
         const maxAttempts = job.opts?.attempts || 4;
         const attemptsMade = job.attemptsMade || 0;
-        // Intermediate attempt failure — job will be retried; keep UI connected
         if (attemptsMade < maxAttempts) {
           res.write(`event: retrying\ndata: ${JSON.stringify({
             message: `AI is busy — automatic retry ${attemptsMade}/${maxAttempts}. Hang tight…`,
@@ -285,7 +296,7 @@ router.get('/job/:jobId/stream', async (req, res) => {
         }
       }
     } catch (err) {
-      console.warn(`[SSE Stream] Could not inspect job state for ${jobId}:`, err.message);
+      console.warn(`[SSE Stream] Could not inspect job state for ${jobIdKey}:`, err.message);
     }
 
     res.write(`event: failed\ndata: ${JSON.stringify({ message: failedReason })}\n\n`);
@@ -293,40 +304,114 @@ router.get('/job/:jobId/stream', async (req, res) => {
   };
 
   const onDelayed = ({ jobId: id }) => {
-    if (id === jobId && !isClosed) {
+    if (matchesJob(id) && !isClosed) {
       res.write(`event: retrying\ndata: ${JSON.stringify({ message: 'Waiting to retry — the AI is catching up…' })}\n\n`);
     }
   };
 
-  // Check current job status to prevent race conditions (in case job is already finished/failed)
+  // Keep proxies from closing idle SSE sockets during long Spotify resolve / Gemini backoff
+  heartbeatTimer = setInterval(() => {
+    if (isClosed) return;
+    res.write(`: heartbeat ${Date.now()}\n\n`);
+  }, 15000);
+
   try {
-    const job = await playlistQueue.getJob(jobId);
+    const job = await playlistQueue.getJob(jobIdKey);
     if (!job) {
       res.write(`event: failed\ndata: ${JSON.stringify({ message: 'Job not found' })}\n\n`);
-      res.end();
+      cleanup();
       return;
     }
 
     const state = await job.getState();
     if (state === 'completed') {
-      res.write(`event: completed\ndata: ${JSON.stringify(job.returnvalue)}\n\n`);
-      res.end();
+      const payload = typeof job.returnvalue === 'string'
+        ? job.returnvalue
+        : JSON.stringify(job.returnvalue ?? {});
+      res.write(`event: completed\ndata: ${payload}\n\n`);
+      cleanup();
       return;
-    } else if (state === 'failed') {
+    }
+    if (state === 'failed') {
       res.write(`event: failed\ndata: ${JSON.stringify({ message: job.failedReason || 'Job failed' })}\n\n`);
-      res.end();
+      cleanup();
       return;
     }
 
-    // Otherwise, subscribe to live events
     queueEvents.on('progress', onProgress);
     queueEvents.on('completed', onCompleted);
     queueEvents.on('failed', onFailed);
     queueEvents.on('delayed', onDelayed);
+
+    // Periodic status poll so a missed Redis event still finishes the UI
+    pollTimer = setInterval(async () => {
+      if (isClosed) return;
+      try {
+        const latest = await playlistQueue.getJob(jobIdKey);
+        if (!latest) return;
+        const latestState = await latest.getState();
+        if (latestState === 'completed') {
+          onCompleted({ jobId: jobIdKey, returnvalue: latest.returnvalue });
+        } else if (latestState === 'failed') {
+          const maxAttempts = latest.opts?.attempts || 4;
+          if ((latest.attemptsMade || 0) >= maxAttempts) {
+            res.write(`event: failed\ndata: ${JSON.stringify({ message: latest.failedReason || 'Job failed' })}\n\n`);
+            cleanup();
+          }
+        } else if (latestState === 'active') {
+          res.write(`event: progress\ndata: ${JSON.stringify({
+            stage: 'working',
+            message: 'Still curating your playlist…'
+          })}\n\n`);
+        }
+      } catch (pollErr) {
+        console.warn(`[SSE Stream] Poll error for ${jobIdKey}:`, pollErr.message);
+      }
+    }, 10000);
   } catch (err) {
-    console.error(`[SSE Stream] Error fetching job state for ${jobId}:`, err);
+    console.error(`[SSE Stream] Error fetching job state for ${jobIdKey}:`, err);
     res.write(`event: failed\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
-    res.end();
+    cleanup();
+  }
+});
+
+/**
+ * Route: GET /api/playlist/job/:jobId
+ * JSON status/result fallback when SSE drops (proxy idle timeout).
+ */
+router.get('/job/:jobId', async (req, res) => {
+  const jobIdKey = String(req.params.jobId);
+  try {
+    if (!playlistQueue) {
+      return res.status(503).json({
+        success: false,
+        state: 'unavailable',
+        message: 'Queue unavailable in this environment'
+      });
+    }
+    const job = await playlistQueue.getJob(jobIdKey);
+    if (!job) {
+      return res.status(404).json({ success: false, state: 'not_found', message: 'Job not found' });
+    }
+
+    const state = await job.getState();
+    if (state === 'completed') {
+      const result = typeof job.returnvalue === 'string'
+        ? JSON.parse(job.returnvalue)
+        : job.returnvalue;
+      return res.json({ success: true, state, result });
+    }
+
+    return res.json({
+      success: true,
+      state,
+      message: job.failedReason || null,
+      attemptsMade: job.attemptsMade || 0,
+      attempts: job.opts?.attempts || 4
+    });
+  } catch (err) {
+    console.error(`[Job Status] Error for ${jobIdKey}:`, err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
