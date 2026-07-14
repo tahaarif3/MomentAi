@@ -59,6 +59,7 @@ let activeTrack = null;
 let stagedFile = null;
 let currentAudio = null;
 let currentAudioVolume = 0.5;
+let pendingGenerationResult = null;
 
 // DOM Elements
 const userPanel = document.getElementById('userPanel');
@@ -403,6 +404,12 @@ async function initSupabaseAuth() {
         if (session) {
           supabaseAccessToken = session.access_token;
           await syncUserWithBackend();
+          if (pendingGenerationResult) {
+            console.log("Logged in! Loading pending playlist...");
+            toggleModal(signInGateModal, false);
+            handleProcessingSuccess(pendingGenerationResult);
+            pendingGenerationResult = null;
+          }
         } else {
           supabaseAccessToken = null;
           authState.loggedIn = false;
@@ -606,10 +613,9 @@ function renderDisconnectedPanel() {
 // Update Playlist Blur State helper
 function updatePlaylistBlurState() {
   const trackCards = document.querySelectorAll('#tracklistContainer .track-card');
-  const VISIBLE_TRACKS = 3;
   
   trackCards.forEach((card, index) => {
-    if (!authState.loggedIn && index >= VISIBLE_TRACKS) {
+    if (!authState.loggedIn) {
       card.classList.add('track-blurred');
     } else {
       card.classList.remove('track-blurred');
@@ -622,17 +628,17 @@ function updatePlaylistBlurState() {
     existingBanner.remove();
   }
 
-  // If anonymous and has blurred tracks, append the Sign In banner
-  if (!authState.loggedIn && trackCards.length > VISIBLE_TRACKS) {
+  // If anonymous and has tracks, append the Sign In banner
+  if (!authState.loggedIn && trackCards.length > 0) {
     const banner = document.createElement('div');
     banner.id = 'blurSignInBanner';
     banner.className = 'blur-signin-banner';
     banner.innerHTML = `
       <div class="blur-banner-content">
         <span class="blur-banner-icon">🔒</span>
-        <p>Sign in to see all ${trackCards.length} tracks and save your playlist</p>
+        <p>Sign in to unlock your generated playlist and save it to Spotify</p>
         <button class="btn btn-primary btn-sm" id="btnBlurSignIn" type="button" style="border-radius:20px">
-          Sign in
+          Sign In / Sign Up
         </button>
       </div>
     `;
@@ -900,6 +906,35 @@ async function uploadAndProcessImage(file) {
 }
 
 function handleProcessingSuccess(result) {
+  // Enforce signup/signin gate on generation completion if not logged in
+  if (!authState.loggedIn) {
+    pendingGenerationResult = result;
+    
+    // Set customized auth gate messages
+    const authModalTitle = document.getElementById('authModalTitle');
+    if (authModalTitle) {
+      authModalTitle.textContent = "Sign in to see your playlist";
+    }
+    const gateSubtitle = document.querySelector('#signInGateModal .modal-subtitle');
+    if (gateSubtitle) {
+      gateSubtitle.textContent = "Your custom playlist is ready! Sign in to reveal the tracks and save it.";
+    }
+
+    // Render results behind the modal (fully blurred)
+    currentGeneration.id = result.generationId;
+    currentGeneration.imagePath = result.imagePath;
+    currentGeneration.metadata = result.metadata;
+    currentGeneration.tracks = result.tracks;
+    currentGeneration.suggestedTracks = result.suggestedTracks || [];
+
+    renderAnalysisResults(result.metadata);
+    refreshPlaylistEditor();
+
+    // Trigger the sign in gate modal
+    toggleModal(signInGateModal, true);
+    return;
+  }
+
   currentGeneration.id = result.generationId;
   currentGeneration.imagePath = result.imagePath;
   currentGeneration.metadata = result.metadata;
@@ -910,9 +945,7 @@ function handleProcessingSuccess(result) {
   currentGeneration.customPrompt = customPromptInput?.value.trim() || '';
 
   // Refresh user tokens if logged in
-  if (authState.loggedIn) {
-    checkAuth();
-  }
+  checkAuth();
 
   // Render results
   renderAnalysisResults(result.metadata);
@@ -922,10 +955,6 @@ function handleProcessingSuccess(result) {
   showPreviewCtas();
   btnSavePlaylist.textContent = "Save Playlist to Spotify";
   btnSavePlaylist.disabled = false;
-
-  if (!authState.loggedIn) {
-    playlistStatusText.textContent = "Sign in to see all tracks and save to Spotify";
-  }
 }
 
 function connectToJobStream(jobId, file) {

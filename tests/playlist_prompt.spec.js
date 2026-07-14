@@ -44,6 +44,12 @@ test.describe('Playlist_pic Custom Prompt E2E Tests', () => {
     console.log(`[TEST] Found ${trackCount} tracks with custom prompt: "${testStyle}"`);
     expect(trackCount).toBeGreaterThan(0);
 
+    // If the auth gate modal is visible (because we are anonymous), close it first so we can click headers
+    const authCloseBtn = page.locator('#btnAuthGateClose');
+    if (await authCloseBtn.isVisible()) {
+      await authCloseBtn.click();
+    }
+
     // 7. Click Reset / Upload New
     await page.click('#btnResetImage');
 
