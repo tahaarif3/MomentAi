@@ -1,16 +1,65 @@
+# MomentAI — Travis CI
+# Runs Playwright E2E against local Postgres.
+# Gemini/Spotify are mocked when NODE_ENV=test (set by Playwright webServer).
+
 language: node_js
 node_js:
-  - "18"
-  - "20"
+  - "22"
+
+dist: jammy
+os: linux
+
+addons:
+  postgresql: "14"
+  apt:
+    packages:
+      - libnss3
+      - libnspr4
+      - libatk1.0-0
+      - libatk-bridge2.0-0
+      - libcups2
+      - libdrm2
+      - libxkbcommon0
+      - libxcomposite1
+      - libxdamage1
+      - libxfixes3
+      - libxrandr2
+      - libgbm1
+      - libasound2
+
+services:
+  - postgresql
 
 cache:
+  npm: true
   directories:
-    - ~/.npm
     - ~/.cache/ms-playwright
+
+env:
+  global:
+    - CI=true
+    - DATABASE_URL=postgresql://postgres@localhost:5432/momentai_ci
+    - DIRECT_URL=postgresql://postgres@localhost:5432/momentai_ci
+    - SESSION_SECRET=travis_ci_session_secret
+    - COOKIE_SECRET=travis_ci_cookie_secret
+    - STORAGE_PROVIDER=local
+    - APP_BASE_URL=http://127.0.0.1:3000
+    - GEMINI_API_KEY=test_gemini_key
+    - SPOTIFY_CLIENT_ID=test_spotify_client_id
+    - SPOTIFY_CLIENT_SECRET=test_spotify_client_secret
+
+before_install:
+  - psql -c 'CREATE DATABASE momentai_ci;' -U postgres || true
 
 install:
   - npm ci
+  - npx prisma generate
+  # Schema history targets Supabase roles; sync current schema.prisma for CI instead of migrate deploy
+  - npx prisma db push --accept-data-loss --skip-generate
   - npx playwright install --with-deps chromium
 
 script:
-  - npx playwright test
+  - npm test
+
+notifications:
+  email: false

@@ -123,7 +123,7 @@ CRITICAL DIRECTIVE: Recommend exactly 15 to 20 specific, real-world songs that p
 - ${excludeSongs.join('\n- ')}`;
   }
 
-  const maxRetries = 3;
+  const maxRetries = 4;
   let attempt = 0;
 
   while (attempt < maxRetries) {
@@ -214,18 +214,37 @@ CRITICAL DIRECTIVE: Recommend exactly 15 to 20 specific, real-world songs that p
       return metadata;
     } catch (error) {
       attempt++;
-      console.warn(`Gemini API Error (Attempt ${attempt}/${maxRetries}):`, error);
+      const overloaded = isGeminiOverloadedError(error);
+      console.warn(`Gemini API Error (Attempt ${attempt}/${maxRetries}):`, overloaded ? 'UNAVAILABLE/high demand' : error);
 
       if (attempt >= maxRetries) {
         const cleanMsg = getCleanGeminiErrorMessage(error);
+        // Signal worker/queue to wait longer before the next job attempt
+        if (overloaded) {
+          throw new Error(`GEMINI_OVERLOADED:${cleanMsg}`);
+        }
         throw new Error(`Failed to parse image with Gemini Flash: ${cleanMsg}`);
       }
 
-      // Exponential backoff: 800ms, 1600ms
-      const backoffMs = Math.pow(2, attempt) * 400;
+      // 503 spikes need long pauses; other errors use milder backoff
+      const backoffMs = overloaded
+        ? Math.min(8000 * Math.pow(2, attempt - 1), 45000) // 8s, 16s, 32s, 45s
+        : Math.pow(2, attempt) * 400;
+      console.warn(`Gemini backing off ${backoffMs}ms before retry...`);
       await new Promise(resolve => setTimeout(resolve, backoffMs));
     }
   }
+}
+
+function isGeminiOverloadedError(error) {
+  const msg = `${error?.message || ''} ${error?.status || ''}`;
+  return (
+    msg.includes('503') ||
+    msg.includes('UNAVAILABLE') ||
+    msg.includes('high demand') ||
+    msg.includes('overloaded') ||
+    error?.status === 503
+  );
 }
 
 /**

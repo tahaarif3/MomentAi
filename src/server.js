@@ -19,6 +19,11 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// DigitalOcean / reverse proxies send X-Forwarded-For — required for express-rate-limit
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Seed test user if in test environment
 import db from './config/db.js';
 if (process.env.NODE_ENV === 'test') {

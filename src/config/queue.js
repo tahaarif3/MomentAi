@@ -29,13 +29,13 @@ if (process.env.NODE_ENV !== 'test') {
   playlistQueue = new Queue('playlist-generation', {
     connection,
     defaultJobOptions: {
-      attempts: 3,
+      attempts: 4,
       backoff: {
         type: 'exponential',
-        delay: 2000 // Retry after 2s, then 4s, then 8s
+        delay: 12000 // 12s → 24s → 48s between retries (Gemini 503 needs space)
       },
-      removeOnComplete: true, // Clean up completed jobs from Redis
-      removeOnFail: false // Keep failed jobs for inspection/retry
+      removeOnComplete: true,
+      removeOnFail: false
     }
   });
 }

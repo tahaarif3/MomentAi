@@ -207,32 +207,26 @@ let worker = null;
 if (process.env.NODE_ENV !== 'test') {
   worker = new Worker('playlist-generation', async (job) => {
     console.log(`[Worker] Starting job ${job.id}`);
-    
-    const result = await processPlaylistJob(job.data, async (progressData) => {
-      await job.updateProgress(progressData);
-    });
 
-    // Artificial delay between job completions to prevent bursting (500ms)
-    console.log(`[Worker] Completed job ${job.id}. Applying 500ms cooldown...`);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    try {
+      const result = await processPlaylistJob(job.data, async (progressData) => {
+        await job.updateProgress(progressData);
+      });
 
-    return result;
+      console.log(`[Worker] Completed job ${job.id}. Applying 500ms cooldown...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return result;
+    } catch (err) {
+      // Normalize overload signals so queue retry backoff applies cleanly
+      if (err?.message?.startsWith('GEMINI_OVERLOADED:')) {
+        const userMsg = err.message.replace(/^GEMINI_OVERLOADED:/, '');
+        throw new Error(`Failed to parse image with Gemini Flash: ${userMsg}`);
+      }
+      throw err;
+    }
   }, {
     connection,
-    concurrency: 2, // Process up to 2 playlists simultaneously
-    settings: {
-      backoffStrategies: {
-        spotifyRateLimit: (attemptsMade, type, err) => {
-          if (err && err.message.startsWith('RATE_LIMIT_ACTIVE:')) {
-            const delay = parseInt(err.message.split(':')[1], 10);
-            console.warn(`[Worker] Spotify 429 active. Backing off job retry for ${delay}ms`);
-            return delay;
-          }
-          // Default exponential backoff
-          return Math.min(2000 * Math.pow(2, attemptsMade), 60000);
-        }
-      }
-    }
+    concurrency: 1, // One at a time — concurrent Gemini calls worsen 503 spikes
   });
 
   worker.on('failed', (job, err) => {

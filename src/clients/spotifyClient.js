@@ -15,6 +15,7 @@ let masterTokenCache = {
 let masterUserIdCache = null;
 
 // ─── Rotating Client Credentials App Pool ───────────────────────────────────────
+// NOTE: Multi-app rotation disabled — always use primary Client App 1.
 const clientPool = [
   {
     id: process.env.SPOTIFY_CLIENT_ID,
@@ -26,27 +27,27 @@ const clientPool = [
   }
 ];
 
-if (process.env.SPOTIFY_CLIENT_ID_2 && process.env.SPOTIFY_CLIENT_SECRET_2) {
-  clientPool.push({
-    id: process.env.SPOTIFY_CLIENT_ID_2,
-    secret: process.env.SPOTIFY_CLIENT_SECRET_2,
-    accessToken: null,
-    expiresAt: 0,
-    isRateLimited: false,
-    rateLimitResetTime: 0
-  });
-}
+// if (process.env.SPOTIFY_CLIENT_ID_2 && process.env.SPOTIFY_CLIENT_SECRET_2) {
+//   clientPool.push({
+//     id: process.env.SPOTIFY_CLIENT_ID_2,
+//     secret: process.env.SPOTIFY_CLIENT_SECRET_2,
+//     accessToken: null,
+//     expiresAt: 0,
+//     isRateLimited: false,
+//     rateLimitResetTime: 0
+//   });
+// }
 
-if (process.env.SPOTIFY_CLIENT_ID_3 && process.env.SPOTIFY_CLIENT_SECRET_3) {
-  clientPool.push({
-    id: process.env.SPOTIFY_CLIENT_ID_3,
-    secret: process.env.SPOTIFY_CLIENT_SECRET_3,
-    accessToken: null,
-    expiresAt: 0,
-    isRateLimited: false,
-    rateLimitResetTime: 0
-  });
-}
+// if (process.env.SPOTIFY_CLIENT_ID_3 && process.env.SPOTIFY_CLIENT_SECRET_3) {
+//   clientPool.push({
+//     id: process.env.SPOTIFY_CLIENT_ID_3,
+//     secret: process.env.SPOTIFY_CLIENT_SECRET_3,
+//     accessToken: null,
+//     expiresAt: 0,
+//     isRateLimited: false,
+//     rateLimitResetTime: 0
+//   });
+// }
 
 let activeClientIndex = 0;
 
@@ -247,60 +248,73 @@ export async function getClientCredentialsToken() {
     return 'mock_client_credentials_token';
   }
 
+  // Stick to primary Client App 1 — no pool rotation.
+  const client = clientPool[0];
+  if (!client?.id || !client?.secret) {
+    throw new Error("SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is missing from environment variables.");
+  }
+
+  if (client.isRateLimited) {
+    if (Date.now() < client.rateLimitResetTime) {
+      const secondsLeft = Math.ceil((client.rateLimitResetTime - Date.now()) / 1000);
+      throw new Error(`Spotify API rate limit is active. Please try again in ${secondsLeft} seconds.`);
+    }
+    client.isRateLimited = false;
+    client.rateLimitResetTime = 0;
+  }
+
+  if (client.accessToken && Date.now() < (client.expiresAt - 60000)) {
+    return client.accessToken;
+  }
+
+  console.log('Refreshing Spotify Client Credentials token for Client App 1...');
+  const basicAuth = 'Basic ' + Buffer.from(client.id + ':' + client.secret).toString('base64');
+  const response = await globalThis.fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Authorization': basicAuth,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials'
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Failed to obtain Spotify Client Credentials token: ${response.statusText} - ${errText}`);
+  }
+
+  const data = await response.json();
+  client.accessToken = data.access_token;
+  client.expiresAt = Date.now() + (data.expires_in * 1000);
+  activeClientIndex = 0;
+  return client.accessToken;
+}
+
+/*
+export async function getClientCredentialsToken_WITH_ROTATION() {
   const startIndex = activeClientIndex;
   do {
     const client = clientPool[activeClientIndex];
-
-    // Check rate limit status for this specific app
     if (client.isRateLimited) {
       if (Date.now() < client.rateLimitResetTime) {
-        // Rotate and check the next one
         activeClientIndex = (activeClientIndex + 1) % clientPool.length;
         continue;
-      } else {
-        client.isRateLimited = false;
-        client.rateLimitResetTime = 0;
       }
+      client.isRateLimited = false;
+      client.rateLimitResetTime = 0;
     }
-
-    // Return cached token if still valid (60s buffer)
     if (client.accessToken && Date.now() < (client.expiresAt - 60000)) {
       return client.accessToken;
     }
-
     console.log(`Refreshing Spotify Client Credentials token for Client App ${activeClientIndex + 1}...`);
-    try {
-      const basicAuth = 'Basic ' + Buffer.from(client.id + ':' + client.secret).toString('base64');
-      const response = await globalThis.fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: {
-          'Authorization': basicAuth,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: new URLSearchParams({
-          grant_type: 'client_credentials'
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        client.accessToken = data.access_token;
-        client.expiresAt = Date.now() + (data.expires_in * 1000);
-        return client.accessToken;
-      } else {
-        const errText = await response.text();
-        console.warn(`Failed to obtain Spotify Client Credentials token for Client App ${activeClientIndex + 1}: ${response.statusText} - ${errText}`);
-      }
-    } catch (err) {
-      console.warn(`Error refreshing token for Client App ${activeClientIndex + 1}:`, err);
-    }
-
-    // Try rotating if refresh failed
+    // ... rotate through pool on failure ...
     activeClientIndex = (activeClientIndex + 1) % clientPool.length;
   } while (activeClientIndex !== startIndex);
-
   throw new Error("All Spotify Developer Applications in the pool are currently rate-limited or failed to refresh.");
 }
+*/
 
 /**
  * Get a fresh access token for the Master Spotify Account.
@@ -550,13 +564,8 @@ export async function getRecommendationsFallback(token, seedGenres, customPrompt
   }
 
   const cleanCustomPrompt = sanitizePromptForSpotifySearch(customPrompt);
-  // Keep vibe short — Spotify search degrades with long natural-language sentences
-  const vibeTokens = (emotionalVibe || '')
-    .split(/[,.;]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(' ');
+  // Do not blend free-text emotional vibe into Spotify queries — it returns 0 hits.
+  // genre:"pop" alone is stable; vibe stays for Gemini / UI only.
 
   const tracksPool = [];
   const seenTrackIds = new Set();
@@ -571,14 +580,11 @@ export async function getRecommendationsFallback(token, seedGenres, customPrompt
       try {
         let query = '';
         if (genre === 'indian') {
-          // 'indian' isn't supported by Spotify search genre filter, map to desi/bollywood keywords
-          const vibe = vibeTokens || 'wedding celebration';
-          query = `bollywood desi hindi punjabi ${vibe}`;
+          query = 'bollywood desi hindi punjabi';
         } else {
-          const blend = vibeTokens ? ` ${vibeTokens}` : '';
           query = cleanCustomPrompt
-            ? `genre:"${genre}" ${cleanCustomPrompt}${blend}`
-            : `genre:"${genre}"${blend}`;
+            ? `genre:"${genre}" ${cleanCustomPrompt}`
+            : `genre:"${genre}"`;
         }
 
         const url = `https://api.spotify.com/v1/search?${new URLSearchParams({
@@ -649,10 +655,9 @@ export async function getRecommendationsFallback(token, seedGenres, customPrompt
         try {
           let query = '';
           if (genre === 'indian') {
-            query = `bollywood desi hindi punjabi ${vibeTokens || 'party'}`;
+            query = 'bollywood desi hindi punjabi party';
           } else {
             query = genre;
-            if (vibeTokens) query = `${query} ${vibeTokens}`;
           }
 
           const url = `https://api.spotify.com/v1/search?${new URLSearchParams({

@@ -267,16 +267,34 @@ router.get('/job/:jobId/stream', async (req, res) => {
     }
   };
 
-  const onFailed = ({ jobId: id, failedReason }) => {
-    if (id === jobId && !isClosed) {
-      res.write(`event: failed\ndata: ${JSON.stringify({ message: failedReason })}\n\n`);
-      cleanup();
+  const onFailed = async ({ jobId: id, failedReason }) => {
+    if (id !== jobId || isClosed) return;
+
+    try {
+      const job = await playlistQueue.getJob(jobId);
+      if (job) {
+        const maxAttempts = job.opts?.attempts || 4;
+        const attemptsMade = job.attemptsMade || 0;
+        // Intermediate attempt failure — job will be retried; keep UI connected
+        if (attemptsMade < maxAttempts) {
+          res.write(`event: retrying\ndata: ${JSON.stringify({
+            message: `AI is busy — automatic retry ${attemptsMade}/${maxAttempts}. Hang tight…`,
+            reason: failedReason
+          })}\n\n`);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn(`[SSE Stream] Could not inspect job state for ${jobId}:`, err.message);
     }
+
+    res.write(`event: failed\ndata: ${JSON.stringify({ message: failedReason })}\n\n`);
+    cleanup();
   };
 
   const onDelayed = ({ jobId: id }) => {
     if (id === jobId && !isClosed) {
-      res.write(`event: retrying\ndata: ${JSON.stringify({ message: 'Spotify is busy, retrying...' })}\n\n`);
+      res.write(`event: retrying\ndata: ${JSON.stringify({ message: 'Waiting to retry — the AI is catching up…' })}\n\n`);
     }
   };
 

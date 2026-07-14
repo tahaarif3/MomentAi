@@ -989,6 +989,22 @@ function connectToJobStream(jobId, file) {
     const streamUrl = `/api/playlist/job/${jobId}/stream`;
     const eventSource = new EventSource(streamUrl);
 
+    eventSource.addEventListener('retrying', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.warn(`[Job Retrying] ${data.message}`);
+        if (loaderProgressText) {
+          loaderProgressText.textContent = data.message || 'AI is busy — retrying automatically…';
+        }
+        const fill = document.getElementById('curationFill');
+        if (fill) {
+          fill.style.width = '35%';
+        }
+      } catch (err) {
+        console.error("Failed to parse retry data:", err);
+      }
+    });
+
     eventSource.addEventListener('progress', (e) => {
       try {
         const progress = JSON.parse(e.data);
@@ -996,20 +1012,13 @@ function connectToJobStream(jobId, file) {
         if (loaderProgressText) {
           loaderProgressText.textContent = progress.message;
         }
-      } catch (err) {
-        console.error("Failed to parse progress data:", err);
-      }
-    });
-
-    eventSource.addEventListener('retrying', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        console.warn(`[Job Rate Limited] Retrying: ${data.message}`);
-        if (loaderProgressText) {
-          loaderProgressText.textContent = "Spotify is overloaded. Retrying automatically...";
+        const fill = document.getElementById('curationFill');
+        if (fill) {
+          const widths = { analyzing: '28%', resolving: '62%', finalizing: '88%' };
+          fill.style.width = widths[progress.stage] || '45%';
         }
       } catch (err) {
-        console.error("Failed to parse retry data:", err);
+        console.error("Failed to parse progress data:", err);
       }
     });
 
