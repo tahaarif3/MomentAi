@@ -38,6 +38,7 @@ cache:
 env:
   global:
     - CI=true
+    - PORT=3000
     - DATABASE_URL=postgresql://postgres@localhost:5432/momentai_ci
     - DIRECT_URL=postgresql://postgres@localhost:5432/momentai_ci
     - SESSION_SECRET=travis_ci_session_secret
