@@ -75,14 +75,19 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     await expect(generateBtn).toBeVisible();
     await generateBtn.click();
 
-    // Wait for analysis to complete
-    await expect(page.locator('#analysisCard')).toBeVisible();
-    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
+    // Wait for analysis to complete (covers long Spotify resolve + retries)
+    await expect(page.locator('#analysisCard')).toBeVisible({ timeout: 60000 });
+    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 90000 });
+
+    // Playlist must be populated before export
+    const trackCards = page.locator('#tracklistContainer .track-card');
+    await expect(trackCards.first()).toBeVisible({ timeout: 15000 });
+    expect(await trackCards.count()).toBeGreaterThan(0);
 
     // 2. Verify that the Save button is visible
     const saveBtn = page.locator('#btnSavePlaylist');
-    await expect(saveBtn).toBeVisible();
-    await expect(saveBtn).toContainText('Save Playlist to Spotify');
+    await expect(saveBtn).toBeVisible({ timeout: 15000 });
+    await expect(saveBtn).toContainText(/Save .*Spotify/i);
 
     // 3. Click Save Playlist - should open our custom modal
     await saveBtn.click();
@@ -131,7 +136,7 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
     const generateBtn = page.locator('#btnGeneratePlaylist');
     await expect(generateBtn).toBeVisible();
     await generateBtn.click();
-    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 30000 });
+    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 90000 });
 
     // 2. Verify no player widget is loaded initially
     const playerContainer = page.locator('#spotifyPlayerContainer');

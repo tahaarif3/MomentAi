@@ -109,7 +109,8 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
   console.log(`AI recommended ${recommendedSongs.length} tracks - resolving on Spotify...`);
 
   const searchResults = [];
-  for (const song of recommendedSongs) {
+  for (let i = 0; i < recommendedSongs.length; i++) {
+    const song = recommendedSongs[i];
     // Intercept rate limits during loop
     const limitReset = spotify.getRateLimitResetTime();
     if (limitReset > 0) {
@@ -124,6 +125,14 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
       }
     } catch (err) {
       console.warn(`Failed to resolve track "${song.title}" by "${song.artist}" on Spotify:`, err);
+    }
+
+    // Keep SSE/proxy alive with progress every few tracks
+    if (i === 0 || (i + 1) % 4 === 0 || i === recommendedSongs.length - 1) {
+      await updateProgressFn({
+        stage: 'resolving',
+        message: `Matching tracks on Spotify… ${i + 1}/${recommendedSongs.length}`
+      });
     }
   }
 
@@ -188,6 +197,7 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
   }
 
   // Fetch supplementary suggestions
+  await updateProgressFn({ stage: 'finalizing', message: 'Adding more song ideas…' });
   const suggestedTracks = await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, finalTracks);
 
   return {
@@ -213,8 +223,10 @@ if (process.env.NODE_ENV !== 'test') {
         await job.updateProgress(progressData);
       });
 
-      console.log(`[Worker] Completed job ${job.id}. Applying 500ms cooldown...`);
+      // Cooldown after return is delayed via short sleep before return so Redis
+      // 'completed' is not starved by long silent work — sleep runs then we return.
       await new Promise(resolve => setTimeout(resolve, 500));
+      console.log(`[Worker] Completed job ${job.id}.`);
       return result;
     } catch (err) {
       // Normalize overload signals so queue retry backoff applies cleanly

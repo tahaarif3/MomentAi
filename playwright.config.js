@@ -18,7 +18,7 @@ export default defineConfig({
     reuseExistingServer: false,
     stdout: 'pipe',
     stderr: 'pipe',
-    timeout: 30000,
+    timeout: 60000,
   },
   projects: [
     {

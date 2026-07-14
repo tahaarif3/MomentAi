@@ -988,6 +988,47 @@ function connectToJobStream(jobId, file) {
     const loaderProgressText = document.getElementById('loaderProgressText');
     const streamUrl = `/api/playlist/job/${jobId}/stream`;
     const eventSource = new EventSource(streamUrl);
+    let settled = false;
+
+    const finishOk = (result) => {
+      if (settled) return;
+      settled = true;
+      eventSource.close();
+      handleProcessingSuccess(result);
+      resolve();
+    };
+
+    const finishErr = (userMsg, type = 'generic', title = 'Generation Failed') => {
+      if (settled) return;
+      settled = true;
+      eventSource.close();
+      showErrorScreen(title, userMsg, type, () => uploadAndProcessImage(file));
+      reject(new Error(userMsg));
+    };
+
+    const recoverFromStatus = async () => {
+      try {
+        const res = await apiFetch(`/api/playlist/job/${jobId}`);
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.state === 'completed' && data.result) {
+          console.log('[Job Recovered] Result loaded after SSE drop');
+          finishOk(data.result);
+          return true;
+        }
+        if (data.state === 'failed' && (data.attemptsMade || 0) >= (data.attempts || 4)) {
+          finishErr(data.message || 'Generation failed.');
+          return true;
+        }
+        if (loaderProgressText) {
+          loaderProgressText.textContent = 'Still working — reconnecting…';
+        }
+        return false;
+      } catch (err) {
+        console.warn('[Job Status Recovery] Failed:', err);
+        return false;
+      }
+    };
 
     eventSource.addEventListener('retrying', (e) => {
       try {
@@ -997,9 +1038,7 @@ function connectToJobStream(jobId, file) {
           loaderProgressText.textContent = data.message || 'AI is busy — retrying automatically…';
         }
         const fill = document.getElementById('curationFill');
-        if (fill) {
-          fill.style.width = '35%';
-        }
+        if (fill) fill.style.width = '35%';
       } catch (err) {
         console.error("Failed to parse retry data:", err);
       }
@@ -1014,7 +1053,15 @@ function connectToJobStream(jobId, file) {
         }
         const fill = document.getElementById('curationFill');
         if (fill) {
-          const widths = { analyzing: '28%', resolving: '62%', finalizing: '88%' };
+          if (progress.stage === 'resolving' && progress.message.includes('/')) {
+            const match = progress.message.match(/(\d+)\s*\/\s*(\d+)/);
+            if (match) {
+              const pct = 40 + Math.round((Number(match[1]) / Number(match[2])) * 40);
+              fill.style.width = `${Math.min(pct, 85)}%`;
+              return;
+            }
+          }
+          const widths = { analyzing: '28%', resolving: '62%', finalizing: '88%', working: '55%' };
           fill.style.width = widths[progress.stage] || '45%';
         }
       } catch (err) {
@@ -1026,13 +1073,10 @@ function connectToJobStream(jobId, file) {
       try {
         const result = JSON.parse(e.data);
         console.log("[Job Completed] Rendering playlist...");
-        eventSource.close();
-        handleProcessingSuccess(result);
-        resolve();
+        finishOk(result);
       } catch (err) {
         console.error("Failed to parse completion data:", err);
-        eventSource.close();
-        reject(new Error("Failed to read completed playlist data."));
+        finishErr("Failed to read completed playlist data.");
       }
     });
 
@@ -1040,8 +1084,6 @@ function connectToJobStream(jobId, file) {
       try {
         const errData = JSON.parse(e.data);
         console.error("[Job Failed] Message:", errData.message);
-        eventSource.close();
-        
         let type = 'generic';
         let errorTitle = 'Generation Failed';
         let userMsg = errData.message || 'An error occurred during playlist generation.';
@@ -1052,18 +1094,27 @@ function connectToJobStream(jobId, file) {
           userMsg = 'The music recommendation engine is temporarily overloaded due to high demand. Please try again in a few seconds.';
         }
 
-        showErrorScreen(errorTitle, userMsg, type, () => uploadAndProcessImage(file));
-        reject(new Error(userMsg));
+        finishErr(userMsg, type, errorTitle);
       } catch (err) {
-        eventSource.close();
-        reject(new Error("Job failed with an unknown error."));
+        finishErr("Job failed with an unknown error.");
       }
     });
 
-    eventSource.onerror = (err) => {
-      console.error("[EventSource Error]", err);
-      eventSource.close();
-      reject(new Error("Loss of connection to generation server. Please try again."));
+    // Proxies often drop idle SSE during long Spotify resolve; recover instead of failing hard
+    let errorRetries = 0;
+    eventSource.onerror = async () => {
+      if (settled) return;
+      errorRetries += 1;
+      console.warn(`[EventSource Error] attempt ${errorRetries} — checking job status…`);
+      const recovered = await recoverFromStatus();
+      if (recovered) return;
+      if (errorRetries >= 3) {
+        eventSource.close();
+        const ok = await recoverFromStatus();
+        if (!ok) {
+          finishErr("Loss of connection to generation server. Please try again.");
+        }
+      }
     };
   });
 }
