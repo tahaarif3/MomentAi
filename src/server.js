@@ -26,6 +26,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // Seed test users before accepting traffic in test environment
 import db from './config/db.js';
+import { ensureGenerationTrackColumns } from './utils/ensureSchema.js';
 
 async function seedTestUsers() {
   const testUsers = [
@@ -130,6 +131,14 @@ app.use((err, req, res, next) => {
 
 if (process.env.NODE_ENV === 'test') {
   await seedTestUsers();
+} else {
+  try {
+    await ensureGenerationTrackColumns(db);
+    console.log('[Prisma] Ensured generations.tracks / suggested_tracks columns.');
+  } catch (err) {
+    console.error('[Prisma] Failed to ensure track columns:', err);
+    throw err;
+  }
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {

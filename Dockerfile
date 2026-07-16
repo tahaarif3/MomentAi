@@ -8,7 +8,7 @@ WORKDIR /app
 # Copy package configuration files
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies for Prisma)
+# Install all dependencies (including Prisma CLI)
 RUN npm ci
 
 # Copy Prisma schema definition
@@ -30,8 +30,8 @@ ENV PORT=3000
 # Copy package configuration files
 COPY package*.json ./
 
-# Install only runtime production dependencies
-RUN npm ci --only=production
+# Install production dependencies (includes prisma CLI for migrate deploy)
+RUN npm ci --omit=dev
 
 # Copy generated Prisma Client files from builder stage
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
@@ -40,8 +40,10 @@ COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/clie
 # Copy application source files
 COPY src ./src
 COPY prisma ./prisma
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 EXPOSE 3000
 
-# Run the Express server in production mode
-CMD ["node", "src/server.js"]
+# Apply migrations then start Express
+CMD ["./docker-entrypoint.sh"]
