@@ -9,6 +9,7 @@ import {
 } from './animations.js';
 import { initRouter, registerScreen, showScreen } from './router.js';
 import { startCamera, stopCamera, capturePhotoFromVideo, bindCameraLifecycle } from './camera.js';
+// startCamera / capturePhotoFromVideo kept imported for easy live-camera re-enable (currently unused)
 import {
   fetchHistory,
   renderMomentsGrid,
@@ -180,8 +181,8 @@ function updateHomeEyebrow() {
   if (hour >= 5 && hour < 12) label = 'MORNING';
   else if (hour >= 12 && hour < 17) label = 'AFTERNOON';
   else if (hour >= 17 && hour < 21) label = 'GOLDEN HOUR';
-  const minsLeft = 60 - new Date().getMinutes();
-  el.textContent = `${label} · ${minsLeft}M LEFT`;
+  // BeReal-style countdown timer removed — time-of-day label only
+  el.textContent = label;
   if (headline) {
     const name = authState.user?.displayName?.split(' ')[0] || '';
     headline.textContent = name ? `Catch the light, ${name}.` : 'Catch the light.';
@@ -286,20 +287,22 @@ function setupScreenRouter() {
 
   registerScreen('capture', {
     onEnter: async () => {
+      // Upload-first: always show the drop zone. Live camera start kept commented out.
       viewfinderVideo?.classList.add('hidden');
       viewfinderUpload?.classList.remove('hidden');
-      const ok = await startCamera({
-        viewfinderVideo,
-        selfieVideo,
-        onFallback: () => {
-          viewfinderVideo?.classList.add('hidden');
-          viewfinderUpload?.classList.remove('hidden');
-        }
-      });
-      if (ok) {
-        viewfinderVideo?.classList.remove('hidden');
-        viewfinderUpload?.classList.add('hidden');
-      }
+      document.querySelector('.selfie-pip')?.classList.add('hidden');
+      // const ok = await startCamera({
+      //   viewfinderVideo,
+      //   selfieVideo,
+      //   onFallback: () => {
+      //     viewfinderVideo?.classList.add('hidden');
+      //     viewfinderUpload?.classList.remove('hidden');
+      //   }
+      // });
+      // if (ok) {
+      //   viewfinderVideo?.classList.remove('hidden');
+      //   viewfinderUpload?.classList.add('hidden');
+      // }
     },
     onLeave: () => stopCamera()
   });
@@ -424,11 +427,12 @@ function setupEventListeners() {
         await beginGenerationWithFile(stagedFile);
         return;
       }
-      if (viewfinderVideo && !viewfinderVideo.classList.contains('hidden')) {
-        const file = await capturePhotoFromVideo(viewfinderVideo);
-        await beginGenerationWithFile(file);
-        return;
-      }
+      // Live camera shutter path disabled — open file picker instead
+      // if (viewfinderVideo && !viewfinderVideo.classList.contains('hidden')) {
+      //   const file = await capturePhotoFromVideo(viewfinderVideo);
+      //   await beginGenerationWithFile(file);
+      //   return;
+      // }
       fileInput?.click();
     } catch (err) {
       showErrorScreen('Capture failed', err.message, 'generic');

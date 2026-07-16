@@ -33,13 +33,25 @@
           <div class="capture-hero-card" id="captureHeroCard">
             <div class="capture-hero-preview photo-placeholder" aria-hidden="true"></div>
             <div class="capture-hero-panel">
-              <p class="mono eyebrow-amber" id="homeEyebrow">GOLDEN HOUR · —</p>
+              <p class="mono eyebrow-amber" id="homeEyebrow">GOLDEN HOUR</p>
               <h2 class="hero-headline" id="homeHeadline">Catch the light.</h2>
               <p class="hero-sub">One photo. One playlist. Yours.</p>
-              <button type="button" class="btn btn-primary btn-full" id="btnHomeCapture">Capture this moment</button>
+              <button type="button" class="btn btn-primary btn-full" id="btnHomeCapture">Upload a moment</button>
               <p class="mono hero-footnote" id="momentsCounter">3 of 3 free moments left today · <button type="button" class="link-amber" data-action="paywall">go unlimited ›</button></p>
             </div>
           </div>
+
+          <section class="home-prompt-section" aria-labelledby="homePromptLabel">
+            <label class="prompt-label" id="homePromptLabel" for="customTextPrompt">Optional music prompt</label>
+            <textarea
+              id="customTextPrompt"
+              class="prompt-input prompt-textarea"
+              rows="3"
+              placeholder="e.g. dark synthwave, soft acoustic morning, rainy indie…"
+              maxlength="280"
+            ></textarea>
+            <p class="mono prompt-hint">Steer genres &amp; vibe before you upload — optional.</p>
+          </section>
 
           <section class="moments-section" aria-labelledby="momentsSectionTitle">
             <div class="section-head">
@@ -50,7 +62,7 @@
           </section>
 
           <section class="ticker-section" aria-label="Demo activity feed">
-            <p class="mono ticker-label">LIVE FROM THE COMMUNITY</p>
+            <p class="mono ticker-label">JUST GENERATED <span class="ticker-demo-inline">(demo)</span></p>
             <div class="ticker-strip" id="demoTicker" aria-live="polite"></div>
           </section>
 
@@ -66,10 +78,11 @@
         </div>
       </section>
 
-      <!-- CAPTURE -->
+      <!-- CAPTURE (upload-first; live camera commented out — GUI retained) -->
       <section class="screen" data-screen="capture" id="screenCapture">
         <div class="screen-inner screen-inner--narrow">
           <div class="viewfinder-wrap">
+            <!-- Live camera viewfinder kept in DOM for future re-enable; currently unused -->
             <video class="viewfinder-video hidden" id="viewfinderVideo" playsinline muted autoplay></video>
             <div class="viewfinder-upload photo-placeholder" id="viewfinderUpload">
               <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden>
@@ -84,7 +97,7 @@
               <video id="selfieVideo" playsinline muted autoplay></video>
               <span class="mono selfie-label">you</span>
             </div>
-            <p class="viewfinder-caption mono">no retakes · this is the moment</p>
+            <p class="viewfinder-caption mono">upload a photo · we'll match the mood</p>
           </div>
 
           <div class="mood-chips" role="group" aria-label="Quick mood presets">
@@ -93,14 +106,12 @@
             <button type="button" class="mood-chip" data-chip="Coffee run">coffee run</button>
           </div>
 
-          <textarea id="customTextPrompt" class="sr-only" aria-hidden="true" tabindex="-1"></textarea>
-
-          <button type="button" class="btn-shutter" id="btnShutter" aria-label="Capture photo">
+          <button type="button" class="btn-shutter" id="btnShutter" aria-label="Choose a photo">
             <span class="btn-shutter-core"></span>
           </button>
           <button type="button" class="btn btn-primary btn-full hidden" id="btnGeneratePlaylist">Generate my soundtrack</button>
-          <p class="mono capture-footnote">tap to capture · we'll read the light, mood + pace</p>
-          <button type="button" class="btn-text upload-fallback-link" id="btnUploadInstead">upload a photo instead</button>
+          <p class="mono capture-footnote">upload a photo · we'll read the light, mood + pace</p>
+          <button type="button" class="btn-text upload-fallback-link" id="btnUploadInstead">choose a different photo</button>
         </div>
       </section>
 
@@ -245,7 +256,7 @@
       </div>
     </div>
 
-    <button type="button" class="floating-shutter" id="btnFloatingShutter" aria-label="Open camera">
+    <button type="button" class="floating-shutter" id="btnFloatingShutter" aria-label="Upload a moment">
       <span class="floating-shutter-core"></span>
     </button>
 
@@ -327,6 +338,11 @@
 
     <footer class="app-footer">
       <p>© 2026 MomentAI</p>
+      <div class="footer-links">
+        <a class="footer-link" href="/privacy.html">Privacy Policy</a>
+        <span aria-hidden="true">·</span>
+        <a class="footer-link" href="/terms.html">Terms of Service</a>
+      </div>
     </footer>
   </div>
 

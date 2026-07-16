@@ -11,10 +11,13 @@ test.describe('Playlist_pic Custom Prompt E2E Tests', () => {
   }
 
   test('should generate playlist suggestions successfully using an optional custom music prompt', async ({ page }) => {
-    await openCapture(page);
+    await page.goto('/');
 
     const testStyle = 'dark synthwave cyber metal';
     await page.locator('#customTextPrompt').fill(testStyle);
+
+    await page.locator('#btnHomeCapture').click();
+    await expect(page.locator('#screenCapture.screen--active')).toBeVisible();
 
     await page.setInputFiles('#fileInput', sampleImagePath);
     await page.locator('#btnGeneratePlaylist').click();
