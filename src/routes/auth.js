@@ -1,7 +1,7 @@
 import express from 'express';
 import db from '../config/db.js';
 import { getAuthUserId, getAuthUser } from '../utils/session.js';
-import { getRemainingToday } from '../utils/moments.js';
+import { getRemainingToday, effectiveDailyLimit, DEFAULT_DAILY_LIMIT } from '../utils/moments.js';
 
 const router = express.Router();
 
@@ -28,7 +28,6 @@ router.post('/callback', async (req, res) => {
       || null;
     const provider = supabaseUser.app_metadata?.provider || 'google';
 
-    // Upsert user in our database
     const user = await db.user.upsert({
       where: { id: userId },
       update: {
@@ -44,7 +43,7 @@ router.post('/callback', async (req, res) => {
         avatar_url: avatarUrl,
         auth_provider: provider,
         tier: 'free',
-        tokens: 10
+        daily_upload_limit: DEFAULT_DAILY_LIMIT
       }
     });
 
@@ -58,7 +57,8 @@ router.post('/callback', async (req, res) => {
         email: user.email,
         avatarUrl: user.avatar_url,
         tier: user.tier,
-        tokens: user.tokens
+        dailyUploadLimit: effectiveDailyLimit(user),
+        momentsRemainingToday: await getRemainingToday(db, user.id, user)
       }
     });
   } catch (err) {
@@ -87,7 +87,7 @@ router.get('/me', async (req, res) => {
         email: true,
         avatar_url: true,
         tier: true,
-        tokens: true
+        daily_upload_limit: true
       }
     });
 
@@ -103,8 +103,8 @@ router.get('/me', async (req, res) => {
         email: user.email,
         avatarUrl: user.avatar_url,
         tier: user.tier,
-        tokens: user.tokens,
-        momentsRemainingToday: await getRemainingToday(db, user.id, user.tier)
+        dailyUploadLimit: effectiveDailyLimit(user),
+        momentsRemainingToday: await getRemainingToday(db, user.id, user)
       }
     });
   } catch (err) {

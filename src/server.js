@@ -11,6 +11,7 @@ import authRouter from './routes/auth.js';
 import playlistRouter from './routes/playlist.js';
 import paymentRouter, { handleStripeWebhook } from './routes/payment.js';
 import healthRouter from './routes/health.js';
+import adminRouter from './routes/admin.js';
 
 // Setup __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -26,20 +27,27 @@ if (process.env.NODE_ENV === 'production') {
 
 // Seed test users before accepting traffic in test environment
 import db from './config/db.js';
-import { ensureGenerationTrackColumns } from './utils/ensureSchema.js';
+import { ensureSchema } from './utils/ensureSchema.js';
 
 async function seedTestUsers() {
   const testUsers = [
-    { id: 'test_user_id', display_name: 'Test User', email: 'test@example.com', auth_provider: 'google', tier: 'free', tokens: 10 },
-    { id: 'history_test_user', display_name: 'History Tester', email: 'history@test.com', auth_provider: 'email', tier: 'free', tokens: 10 },
-    { id: 'daily_limit_user', display_name: 'Daily Limit User', email: 'daily@test.com', auth_provider: 'email', tier: 'free', tokens: 10 },
-    { id: 'premium_test_user', display_name: 'Premium Tester', email: 'premium@test.com', auth_provider: 'email', tier: 'premium', tokens: 999 }
+    { id: 'test_user_id', display_name: 'Test User', email: 'test@example.com', auth_provider: 'google', tier: 'free', daily_upload_limit: 3 },
+    { id: 'history_test_user', display_name: 'History Tester', email: 'history@test.com', auth_provider: 'email', tier: 'free', daily_upload_limit: 3 },
+    { id: 'daily_limit_user', display_name: 'Daily Limit User', email: 'daily@test.com', auth_provider: 'email', tier: 'free', daily_upload_limit: 3 },
+    { id: 'premium_test_user', display_name: 'Premium Tester', email: 'premium@test.com', auth_provider: 'email', tier: 'premium', daily_upload_limit: 3 },
+    { id: 'boosted_limit_user', display_name: 'Boosted Free User', email: 'boosted@test.com', auth_provider: 'email', tier: 'free', daily_upload_limit: 10 }
   ];
   console.log('Seeding test users in database using Prisma...');
   await db.generation.deleteMany();
   await Promise.all(testUsers.map((u) => db.user.upsert({
     where: { id: u.id },
-    update: { display_name: u.display_name, email: u.email, auth_provider: u.auth_provider, tier: u.tier, tokens: u.tokens },
+    update: {
+      display_name: u.display_name,
+      email: u.email,
+      auth_provider: u.auth_provider,
+      tier: u.tier,
+      daily_upload_limit: u.daily_upload_limit
+    },
     create: u
   })));
   console.log('Test users seeded successfully.');
@@ -114,6 +122,7 @@ app.use('/health', healthRouter); // Mount health check for Load Balancers
 app.use('/api/auth', authRouter);
 app.use('/api/playlist', apiLimiter, playlistRouter); // Apply rate limiter to process/save routes
 app.use('/api/payment', apiLimiter, paymentRouter);   // Apply rate limiter to payments
+app.use('/api/admin', apiLimiter, adminRouter);
 
 // Fallback: Send public/index.html for any frontend SPA navigation
 app.get('*', (req, res) => {
@@ -133,8 +142,8 @@ if (process.env.NODE_ENV === 'test') {
   await seedTestUsers();
 } else {
   try {
-    await ensureGenerationTrackColumns(db);
-    console.log('[Prisma] Ensured generations.tracks / suggested_tracks columns.');
+    await ensureSchema(db);
+    console.log('[Prisma] Ensured schema columns (tracks, daily_upload_limit).');
   } catch (err) {
     console.error('[Prisma] Failed to ensure track columns:', err);
     throw err;

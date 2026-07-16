@@ -252,6 +252,7 @@ a {
 }
 
 .token-badge,
+.quota-badge,
 .premium-badge {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
@@ -1324,17 +1325,120 @@ textarea.prompt-input {
 
 .spotify-embed-container {
   width: 100%;
-  height: 80px;
+  min-height: 80px;
+  height: auto;
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--border);
-  background: #000;
+  background: var(--surface);
 }
 
 .spotify-embed-container iframe {
   width: 100%;
   height: 80px;
   border: none;
+  display: block;
+  background: #000;
+}
+
+.custom-audio-player {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  background: linear-gradient(165deg, #2a2118, #17110c);
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.player-label {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.player-track-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-volume-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 180px;
+  max-width: 280px;
+}
+
+.volume-mute-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+  color: var(--text);
+}
+
+.volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(236, 231, 223, 0.15);
+  outline: none;
+  cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #1d1509;
+  cursor: pointer;
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #1d1509;
+  cursor: pointer;
+}
+
+.volume-pct {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: right;
+}
+
+.iframe-player-wrapper {
+  background: #000;
+}
+
+.iframe-volume-note {
+  padding: 8px 12px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
 }
 
 /* ---------- Modals ---------- */
@@ -1977,10 +2081,48 @@ textarea.prompt-input {
 .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
 .section-count { color: var(--text-muted); }
 .moments-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.moment-card { text-align: left; background: var(--surface); border: 1px solid rgba(236,231,223,0.06); border-radius: 18px; padding: 0; overflow: hidden; cursor: pointer; color: inherit; }
+.moment-card {
+  position: relative;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid rgba(236,231,223,0.06);
+  border-radius: 18px;
+  padding: 0;
+  overflow: hidden;
+  color: inherit;
+}
+.moment-card-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .moment-card-photo { height: 130px; background-size: cover; background-position: center; }
 .moment-card-title { padding: 10px 12px 4px; font-size: 15px; font-weight: 700; }
 .moment-card-meta { padding: 0 12px 12px; color: var(--text-muted); font-size: 11px; }
+.moment-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(14, 10, 7, 0.72);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.moment-card-delete:hover {
+  background: #8a3f32;
+  opacity: 1;
+}
 .moment-nudge-card { grid-column: 1 / -1; background: var(--surface); border: 1px dashed rgba(233,169,79,0.35); border-radius: 18px; padding: 24px; cursor: pointer; color: inherit; text-align: left; }
 .moments-empty { color: var(--text-muted); grid-column: 1 / -1; }
 

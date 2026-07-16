@@ -15,7 +15,7 @@ model User {
   avatar_url              String?
   auth_provider           String?                             // "google", "apple", etc.
   tier                    String       @default("free")
-  tokens                  Int          @default(10)
+  daily_upload_limit      Int          @default(3)            // free-tier moments/day; premium ignores this
   stripe_customer_id      String?      @unique
   stripe_subscription_id  String?
   created_at              DateTime     @default(now())
