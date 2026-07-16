@@ -12,8 +12,10 @@ import { playlistQueue, connection } from '../config/queue.js';
 import { processPlaylistJob } from '../workers/playlistWorker.js';
 import { QueueEvents } from 'bullmq';
 import {
+  DEFAULT_DAILY_LIMIT,
   FREE_DAILY_LIMIT,
   getRemainingToday,
+  effectiveDailyLimit,
   trackLimitForTier,
   startOfUtcDay
 } from '../utils/moments.js';
@@ -23,7 +25,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '../..');
 
-export { FREE_DAILY_LIMIT, getRemainingToday };
+export { FREE_DAILY_LIMIT, DEFAULT_DAILY_LIMIT, getRemainingToday };
 
 const router = express.Router();
 
@@ -61,7 +63,8 @@ const upload = multer({
 });
 
 /**
- * Middleware: enforce 3 moments/day for free tier (UTC). Anonymous users pass through.
+ * Middleware: enforce per-user daily_upload_limit (UTC). Anonymous users pass through.
+ * Premium users are unlimited. Raise a free user's cap via users.daily_upload_limit.
  */
 async function checkDailyLimit(req, res, next) {
   try {
@@ -70,10 +73,12 @@ async function checkDailyLimit(req, res, next) {
 
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { tier: true }
+      select: { tier: true, daily_upload_limit: true }
     });
     if (!user) return next();
-    if (user.tier === 'premium') return next();
+
+    const limit = effectiveDailyLimit(user);
+    if (limit == null) return next(); // premium / unlimited
 
     const todayCount = await db.generation.count({
       where: {
@@ -82,12 +87,13 @@ async function checkDailyLimit(req, res, next) {
       }
     });
 
-    if (todayCount >= FREE_DAILY_LIMIT) {
+    if (todayCount >= limit) {
       return res.status(403).json({
         success: false,
         code: 'DAILY_LIMIT',
         remainingToday: 0,
-        message: 'You have used all 3 free moments for today. Upgrade to Plus for unlimited generations.'
+        dailyUploadLimit: limit,
+        message: `You have used all ${limit} free moments for today. Upgrade to Plus for unlimited generations.`
       });
     }
 
@@ -219,7 +225,7 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
         display_name: 'Test User',
         email: `${userId}@test.com`,
         tier: userId === 'premium_test_user' ? 'premium' : 'free',
-        tokens: 10
+        daily_upload_limit: 3
       }
     });
   }
@@ -594,7 +600,7 @@ router.get('/history', async (req, res) => {
   try {
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { tier: true }
+      select: { tier: true, daily_upload_limit: true }
     });
     if (!user) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -626,9 +632,15 @@ router.get('/history', async (req, res) => {
       track_count: Array.isArray(row.tracks) ? row.tracks.length : 0
     }));
 
-    const remainingToday = await getRemainingToday(db, userId, user.tier);
+    const remainingToday = await getRemainingToday(db, userId, user);
+    const dailyUploadLimit = effectiveDailyLimit(user);
 
-    res.json({ success: true, remainingToday, history });
+    res.json({
+      success: true,
+      remainingToday,
+      dailyUploadLimit,
+      history
+    });
   } catch (error) {
     console.error('Failed to fetch history:', error);
     res.status(500).json({ success: false, message: error.message });
@@ -662,6 +674,47 @@ router.get('/generation/:id', async (req, res) => {
 });
 
 /**
+ * Route: DELETE /api/playlist/generation/:id
+ * Remove a saved moment from the user's history.
+ */
+router.delete('/generation/:id', async (req, res) => {
+  const userId = await getAuthUserId(req);
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  try {
+    const row = await db.generation.findFirst({
+      where: { id: req.params.id, user_id: userId },
+      select: { id: true, image_path: true }
+    });
+
+    if (!row) {
+      return res.status(404).json({ success: false, message: 'Moment not found.' });
+    }
+
+    await db.generation.delete({ where: { id: row.id } });
+
+    // Best-effort local file cleanup (ignore remote S3/R2 URLs)
+    if (row.image_path?.startsWith('/uploads/')) {
+      const localPath = path.resolve(projectRoot, row.image_path.slice(1));
+      fs.promises.unlink(localPath).catch(() => {});
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { tier: true, daily_upload_limit: true }
+    });
+    const remainingToday = await getRemainingToday(db, userId, user);
+
+    res.json({ success: true, remainingToday });
+  } catch (error) {
+    console.error('Failed to delete generation:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
  * Route: POST /api/playlist/regenerate
  * Premium-only: re-run generation from a stored moment photo.
  */
@@ -686,7 +739,7 @@ router.post('/regenerate', async (req, res) => {
           display_name: 'Test User',
           email: `${userId}@test.com`,
           tier: userId === 'premium_test_user' ? 'premium' : 'free',
-          tokens: 10
+          daily_upload_limit: 3
         }
       });
     }

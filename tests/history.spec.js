@@ -62,4 +62,31 @@ test.describe('Your moments history API', () => {
     const err = await fourth.json();
     expect(err.code).toBe('DAILY_LIMIT');
   });
+
+  test('can delete a moment from history', async ({ request }) => {
+    const userId = 'history_test_user';
+    const proc = await processImage(request, userId);
+    expect(proc.ok()).toBeTruthy();
+    const created = await proc.json();
+    expect(created.generationId).toBeTruthy();
+
+    const del = await request.delete(`${API}/api/playlist/generation/${created.generationId}`, {
+      headers: { Authorization: 'Bearer test_token', 'x-test-user-id': userId }
+    });
+    expect(del.ok()).toBeTruthy();
+
+    const detail = await request.get(`${API}/api/playlist/generation/${created.generationId}`, {
+      headers: { Authorization: 'Bearer test_token', 'x-test-user-id': userId }
+    });
+    expect(detail.status()).toBe(404);
+  });
+
+  test('boosted daily_upload_limit allows more than 3 generations', async ({ request }) => {
+    const userId = 'boosted_limit_user';
+    // Seeded with daily_upload_limit: 10 — 4th should succeed (unlike default free)
+    for (let i = 0; i < 4; i += 1) {
+      const res = await processImage(request, userId);
+      expect(res.ok()).toBeTruthy();
+    }
+  });
 });

@@ -12,6 +12,7 @@ import { startCamera, stopCamera, capturePhotoFromVideo, bindCameraLifecycle } f
 // startCamera / capturePhotoFromVideo kept imported for easy live-camera re-enable (currently unused)
 import {
   fetchHistory,
+  deleteMoment,
   renderMomentsGrid,
   updateMomentsCounter,
   startDemoTicker,
@@ -67,7 +68,13 @@ let currentGeneration = {
 let activeTrack = null;
 let stagedFile = null;
 let currentAudio = null;
-let currentAudioVolume = 0.5;
+let currentAudioVolume = (() => {
+  try {
+    const saved = parseFloat(localStorage.getItem('momentai_preview_volume'));
+    if (Number.isFinite(saved) && saved >= 0 && saved <= 1) return saved;
+  } catch (_) { /* ignore */ }
+  return 0.5;
+})();
 let pendingGenerationResult = null;
 
 // DOM Elements
@@ -197,10 +204,16 @@ async function refreshHomeScreen() {
       renderMomentsGrid(momentsGrid, data.history || [], {
         isLoggedIn: true,
         onOpen: openSavedMoment,
+        onDelete: handleDeleteMoment,
         onSignInNudge: () => openAuthModal('signin')
       });
       if (momentsCount) momentsCount.textContent = `${(data.history || []).length} saved`;
-      updateMomentsCounter(momentsCounter, data.remainingToday, authState.user?.tier);
+      const limit = data.dailyUploadLimit ?? authState.user?.dailyUploadLimit ?? 3;
+      if (authState.user) {
+        authState.user.momentsRemainingToday = data.remainingToday;
+        authState.user.dailyUploadLimit = limit;
+      }
+      updateMomentsCounter(momentsCounter, data.remainingToday, authState.user?.tier, limit);
     } catch (err) {
       console.warn('History load failed:', err);
     }
@@ -208,11 +221,30 @@ async function refreshHomeScreen() {
     renderMomentsGrid(momentsGrid, [], {
       isLoggedIn: false,
       onOpen: () => {},
+      onDelete: () => {},
       onSignInNudge: () => openAuthModal('signin')
     });
-    updateMomentsCounter(momentsCounter, 3, 'free');
+    updateMomentsCounter(momentsCounter, 3, 'free', 3);
   }
   wirePaywallLinks(document.getElementById('screenHome'));
+}
+
+async function handleDeleteMoment(generationId) {
+  if (!generationId) return;
+  const ok = window.confirm('Remove this moment from your history? This cannot be undone.');
+  if (!ok) return;
+  try {
+    const data = await deleteMoment(apiFetch, generationId);
+    if (authState.user) {
+      authState.user.momentsRemainingToday = data.remainingToday;
+    }
+    await refreshHomeScreen();
+    if (currentGeneration.id === generationId) {
+      currentGeneration = { id: null, imagePath: null, metadata: null, tracks: [], suggestedTracks: [], customPrompt: '' };
+    }
+  } catch (err) {
+    showErrorScreen('Could not delete moment', err.message, 'generic');
+  }
 }
 
 function wirePaywallLinks(root = document) {
@@ -759,8 +791,9 @@ function renderUserPanel() {
   if (user.tier === 'premium') {
     badgeHtml = '<span class="premium-badge">PLUS</span>';
   } else {
-    const left = user.momentsRemainingToday ?? 3;
-    badgeHtml = `<span class="token-badge">${left}/3 today</span>`;
+    const limit = user.dailyUploadLimit ?? 3;
+    const left = user.momentsRemainingToday ?? limit;
+    badgeHtml = `<span class="quota-badge">${left}/${limit} today</span>`;
   }
 
   userPanel.innerHTML = `
@@ -1658,22 +1691,43 @@ window.togglePlayTrack = function(trackId, searchSuggestions = false) {
       spotifyPlayerContainer.innerHTML = `
         <div class="custom-audio-player">
           <div class="player-info">
-            <span class="player-label">🎵 Previewing Track</span>
-            <span class="player-track-name">${track.name} - ${track.artists.map(a => a.name).join(', ')}</span>
+            <span class="player-label mono">PREVIEW</span>
+            <span class="player-track-name">${escapeHtml(track.name)} — ${escapeHtml(track.artists.map(a => a.name).join(', '))}</span>
           </div>
           <div class="player-volume-control">
-            <span class="volume-icon">🔊</span>
-            <input type="range" min="0" max="1" step="0.05" value="${currentAudioVolume}" id="previewVolumeSlider" class="volume-slider">
+            <button type="button" class="volume-mute-btn" id="previewMuteBtn" aria-label="Mute">${currentAudioVolume === 0 ? '🔇' : '🔊'}</button>
+            <input type="range" min="0" max="1" step="0.05" value="${currentAudioVolume}" id="previewVolumeSlider" class="volume-slider" aria-label="Preview volume">
+            <span class="volume-pct mono" id="previewVolumePct">${Math.round(currentAudioVolume * 100)}%</span>
           </div>
         </div>
       `;
 
       const slider = document.getElementById('previewVolumeSlider');
+      const pctEl = document.getElementById('previewVolumePct');
+      const muteBtn = document.getElementById('previewMuteBtn');
+      let volumeBeforeMute = currentAudioVolume || 0.5;
+
+      const applyVolume = (value) => {
+        currentAudioVolume = value;
+        if (currentAudio) currentAudio.volume = currentAudioVolume;
+        if (slider) slider.value = String(currentAudioVolume);
+        if (pctEl) pctEl.textContent = `${Math.round(currentAudioVolume * 100)}%`;
+        if (muteBtn) muteBtn.textContent = currentAudioVolume === 0 ? '🔇' : '🔊';
+        try { localStorage.setItem('momentai_preview_volume', String(currentAudioVolume)); } catch (_) { /* ignore */ }
+      };
+
       if (slider) {
         slider.addEventListener('input', (e) => {
-          currentAudioVolume = parseFloat(e.target.value);
-          if (currentAudio) {
-            currentAudio.volume = currentAudioVolume;
+          applyVolume(parseFloat(e.target.value));
+        });
+      }
+      if (muteBtn) {
+        muteBtn.addEventListener('click', () => {
+          if (currentAudioVolume > 0) {
+            volumeBeforeMute = currentAudioVolume;
+            applyVolume(0);
+          } else {
+            applyVolume(volumeBeforeMute || 0.5);
           }
         });
       }

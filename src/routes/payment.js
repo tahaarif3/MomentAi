@@ -6,10 +6,8 @@ import {
   createPortalSession,
   getOrCreateStripeCustomer,
   getPremiumPriceId,
-  getTokenPackPriceId,
   isStripeConfigured,
-  stripe,
-  TOKEN_PACK_CREDITS
+  stripe
 } from '../services/stripeService.js';
 
 const router = express.Router();
@@ -49,13 +47,6 @@ async function claimStripeEvent(eventId) {
   }
 }
 
-async function creditTokenPack(userId) {
-  return db.user.update({
-    where: { id: userId },
-    data: { tokens: { increment: TOKEN_PACK_CREDITS } }
-  });
-}
-
 async function activatePremium(userId, subscriptionId) {
   return db.user.update({
     where: { id: userId },
@@ -92,7 +83,7 @@ async function handleCheckoutCompleted(session) {
   }
 
   if (purchaseType === 'token_pack') {
-    await creditTokenPack(userId);
+    console.warn('Ignoring deprecated token_pack purchase for user', userId);
     return;
   }
 
@@ -128,10 +119,16 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
   }
 
   const purchaseType = req.body?.purchaseType;
-  if (!['token_pack', 'premium'].includes(purchaseType)) {
+  if (purchaseType === 'token_pack') {
+    return res.status(410).json({
+      success: false,
+      message: 'Token packs are retired. Upgrade to MomentAI Plus for unlimited daily moments.'
+    });
+  }
+  if (purchaseType !== 'premium') {
     return res.status(400).json({
       success: false,
-      message: 'purchaseType must be "token_pack" or "premium".'
+      message: 'purchaseType must be "premium".'
     });
   }
 
@@ -140,9 +137,7 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
     if (!user) return;
 
     const customerId = await getOrCreateStripeCustomer(db, user);
-    const priceId = purchaseType === 'token_pack'
-      ? await getTokenPackPriceId()
-      : await getPremiumPriceId();
+    const priceId = await getPremiumPriceId();
 
     const session = await createCheckoutSession({
       customerId,
@@ -189,29 +184,10 @@ router.post('/create-portal-session', requireAuth, async (req, res) => {
  * Legacy mock route — used only when Stripe is not configured.
  */
 router.post('/purchase-tokens', requireAuth, async (req, res) => {
-  if (isStripeConfigured) {
-    return res.status(400).json({
-      success: false,
-      message: 'Use Stripe Checkout for token purchases.',
-      checkoutRequired: true
-    });
-  }
-
-  try {
-    const user = await creditTokenPack(req.userId);
-    res.json({
-      success: true,
-      message: `Payment successful! ${TOKEN_PACK_CREDITS} tokens have been credited to your account.`,
-      tokens: user.tokens,
-      tier: user.tier
-    });
-  } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-    console.error('Token purchase error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
+  return res.status(410).json({
+    success: false,
+    message: 'Token packs are retired. Upgrade to MomentAI Plus for unlimited daily moments.'
+  });
 });
 
 /**
@@ -231,8 +207,8 @@ router.post('/subscribe', requireAuth, async (req, res) => {
     const user = await activatePremium(req.userId);
     res.json({
       success: true,
-      message: 'Welcome to Premium! You now have unlimited playlist generations and advanced mood control.',
-      tokens: user.tokens,
+      message: 'Welcome to Plus! You now have unlimited moments.',
+      dailyUploadLimit: null,
       tier: user.tier
     });
   } catch (error) {
@@ -262,7 +238,7 @@ router.post('/cancel-subscription', requireAuth, async (req, res) => {
     res.json({
       success: true,
       message: 'Your subscription has been cancelled. You have returned to the Free tier.',
-      tokens: user.tokens,
+      dailyUploadLimit: user.daily_upload_limit,
       tier: user.tier
     });
   } catch (error) {

@@ -24,11 +24,20 @@ See `package.json`: `npm run dev`, `npm test`, `npm run db:migrate`, `npx prisma
 - Entry pipeline preserved in `src/public/app.js` (`uploadAndProcessImage`, `handleProcessingSuccess`, `renderAnalysisResults`)
 - Playwright waits on `#screenPlaylist.screen--active`, not `#analysisLoader` hidden (loader lives on inactive loading screen once playlist shows)
 - Test hooks: `#fileInput`, `#btnGeneratePlaylist`, `#analysisLoader`, `#tracklistContainer .track-card`, sr-only `#envContext` / `#emotionalVibe` / valence nodes
+- Preview volume: `#previewVolumeSlider` in the custom audio player (persisted in `localStorage`)
 
 ### Schema / migrations
 
 - Source of truth: `npm run db:migrate` (`prisma migrate deploy`). Do **not** use `db push` in production.
 - Docker boots via `docker-entrypoint.sh`, which runs migrate (and baselines `0_init` if the DB already exists).
-- `src/utils/ensureSchema.js` also `ADD COLUMN IF NOT EXISTS` for `tracks` / `suggested_tracks` on non-test startup so history/worker do not crash if migrate was skipped once.
-- If a live DB already matches the pre-tracks schema and migrate fails on `0_init`, run once:
-  `npx prisma migrate resolve --applied 0_init && npm run db:migrate`
+- `src/utils/ensureSchema.js` ensures `tracks` / `suggested_tracks` / `daily_upload_limit` on non-test startup.
+- **Daily uploads (not tokens):** free users are capped by `users.daily_upload_limit` (default `3`). Premium (`tier = 'premium'`) is unlimited.
+- To give a user more free uploads:
+  1. SQL: `UPDATE users SET daily_upload_limit = 20 WHERE email = 'friend@example.com';`
+  2. Admin API (set `ADMIN_API_SECRET`): `PATCH /api/admin/users/by-email/daily-limit` with header `x-admin-secret` and body `{ "email": "...", "dailyUploadLimit": 20 }`
+- If migrate fails on `0_init` for an existing DB: `npx prisma migrate resolve --applied 0_init && npm run db:migrate`
+
+### Test mode
+
+- `NODE_ENV=test`: synchronous playlist processing, mocked Gemini/Spotify, test users seeded **before** `app.listen()` in `src/server.js`
+- API tests use `Authorization: Bearer test_token` + `x-test-user-id` header (`src/utils/session.js`)

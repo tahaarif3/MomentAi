@@ -63,13 +63,22 @@ export function stopDemoTicker() {
 export async function fetchHistory(apiFetch) {
   const res = await apiFetch('/api/playlist/history');
   if (!res.ok) {
-    if (res.status === 401) return { remainingToday: null, history: [] };
+    if (res.status === 401) return { remainingToday: null, dailyUploadLimit: 3, history: [] };
     throw new Error('Failed to load your moments.');
   }
   return res.json();
 }
 
-export function renderMomentsGrid(gridEl, history, { onOpen, onSignInNudge, isLoggedIn }) {
+export async function deleteMoment(apiFetch, generationId) {
+  const res = await apiFetch(`/api/playlist/generation/${generationId}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to delete moment.');
+  }
+  return data;
+}
+
+export function renderMomentsGrid(gridEl, history, { onOpen, onDelete, onSignInNudge, isLoggedIn }) {
   if (!gridEl) return;
 
   gridEl.innerHTML = '';
@@ -87,35 +96,43 @@ export function renderMomentsGrid(gridEl, history, { onOpen, onSignInNudge, isLo
   }
 
   if (!history?.length) {
-    gridEl.innerHTML = `<p class="moments-empty mono">No saved moments yet — capture your first one above.</p>`;
+    gridEl.innerHTML = `<p class="moments-empty mono">No saved moments yet — upload your first one above.</p>`;
     return;
   }
 
   history.forEach((row) => {
-    const card = document.createElement('button');
-    card.type = 'button';
+    const card = document.createElement('div');
     card.className = 'moment-card';
     card.dataset.generationId = row.id;
     const imgSrc = row.image_path?.startsWith('http') ? row.image_path : row.image_path;
     const trackLabel = row.track_count === 1 ? '1 track' : `${row.track_count || 0} tracks`;
     card.innerHTML = `
-      <div class="moment-card-photo" style="background-image:url('${escapeAttr(imgSrc)}')"></div>
-      <p class="moment-card-title">${escapeHtml(momentTitle(row))}</p>
-      <p class="moment-card-meta mono">${formatMomentDate(row.created_at)} · ${trackLabel}</p>
+      <button type="button" class="moment-card-open" aria-label="Open moment">
+        <div class="moment-card-photo" style="background-image:url('${escapeAttr(imgSrc)}')"></div>
+        <p class="moment-card-title">${escapeHtml(momentTitle(row))}</p>
+        <p class="moment-card-meta mono">${formatMomentDate(row.created_at)} · ${trackLabel}</p>
+      </button>
+      <button type="button" class="moment-card-delete" aria-label="Remove from history" title="Remove">×</button>
     `;
-    card.addEventListener('click', () => onOpen(row.id));
+    card.querySelector('.moment-card-open')?.addEventListener('click', () => onOpen?.(row.id));
+    card.querySelector('.moment-card-delete')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onDelete?.(row.id);
+    });
     gridEl.appendChild(card);
   });
 }
 
-export function updateMomentsCounter(el, remainingToday, tier) {
+export function updateMomentsCounter(el, remainingToday, tier, dailyUploadLimit = 3) {
   if (!el) return;
   if (tier === 'premium') {
     el.innerHTML = 'Unlimited moments · <button type="button" class="link-amber" data-action="paywall">Plus active</button>';
     return;
   }
-  const left = remainingToday ?? 3;
-  el.innerHTML = `${left} of 3 free moments left today · <button type="button" class="link-amber" data-action="paywall">go unlimited ›</button>`;
+  const limit = dailyUploadLimit ?? 3;
+  const left = remainingToday ?? limit;
+  el.innerHTML = `${left} of ${limit} free moments left today · <button type="button" class="link-amber" data-action="paywall">go unlimited ›</button>`;
 }
 
 function escapeHtml(str) {
