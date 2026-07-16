@@ -11,10 +11,10 @@ Optimized for **Nikita Bier's 3-second time-to-value rule**, it uses an inverted
 *   **Visual Mood Analysis**: Ingests images and uses **Gemini 2.5 Flash** to extract environmental context, emotional vibes, dominant color palettes, and seed genres.
 *   **Dynamic Spotify Search Engine**: Custom-tailored recommendations that combine parsed seed genres, custom user prompt directives, and visual emotional vibes with randomized offsets to generate fresh, unique tracklists.
 *   **Interactive Playlist Editor**: Add or remove tracks from the generated playlist, browse supplementary suggestions, and load more recommendations on demand via `/api/playlist/suggest-more`.
-*   **Desktop Landing Layout**: Full-width hero card with side-by-side upload and analysis preview, animated view transitions, and a dedicated preview chrome state.
+*   **Camera-First UI**: BeReal-inspired capture flow with upload fallback, six-screen router (Home → Capture → Loading → Playlist → Share → Paywall), and **Your Moments** history grid.
 *   **Inverted Onboarding Flow**: Zero upfront login walls. Users upload a picture and see their aesthetic profile immediately. Spotify Authentication is requested only when they click "Save to Spotify".
 *   **Native Previews with Volume Control**: Direct audio preview of tracks using native HTML5 audio controls with interactive volume sliders.
-*   **Premium Visual Value Gate**: Blurs recommendations and displays a glassmorphic lockout overlay if the user is unauthenticated or has reached their free daily token generation limit.
+*   **Premium Visual Value Gate**: Blurs recommendations and displays a glassmorphic lockout overlay if the user is unauthenticated or has reached the free daily moment limit (3/day).
 *   **Duplicate-Free Recommendations**: Double-deduplication filters repeat tracks within a playlist and across prior generations for the same user.
 *   **Security-First Architecture**: 100% parameterized database queries (Prisma), signed cryptographic cookies, and safe CORS isolation policies.
 
@@ -24,7 +24,7 @@ Optimized for **Nikita Bier's 3-second time-to-value rule**, it uses an inverted
 
 *   **Frontend**: Vanilla HTML5, CSS3 (curated dark mode, glassmorphism, responsive mobile-first layouts), and ES6 JavaScript.
 *   **Backend**: Node.js, Express.js.
-*   **Database**: Prisma ORM with SQLite (`database.db`).
+*   **Database**: Prisma ORM with PostgreSQL (migrations via `npm run db:migrate`).
 *   **AI Integration**: Google Gen AI SDK (Gemini 2.5 Flash).
 *   **Music Integration**: Spotify Web API.
 *   **E2E Testing**: Playwright.
@@ -47,10 +47,14 @@ npm install
 ```
 
 ### 3. Setup Database
-Initialize the SQLite database using Prisma:
+Apply Prisma migrations (requires PostgreSQL and `DATABASE_URL` in `.env`):
+
 ```bash
-npx prisma db push
+npx prisma generate
+npm run db:migrate
 ```
+
+For a fresh local database, create the DB first, then run the commands above. Do **not** use `prisma db push` in production — migrations are the source of truth.
 
 ### 4. Configuration (`.env`)
 Create a `.env` file in the root directory and populate it with your API keys:

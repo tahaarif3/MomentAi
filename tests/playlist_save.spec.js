@@ -67,17 +67,11 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
   });
 
   test('should generate tracks and save playlist', async ({ page }) => {
-    // 1. Upload image and generate playlist
-    const fileInput = page.locator('#fileInput');
-    await fileInput.setInputFiles(sampleImagePath);
-
-    const generateBtn = page.locator('#btnGeneratePlaylist');
-    await expect(generateBtn).toBeVisible();
-    await generateBtn.click();
-
-    // Wait for analysis to complete (covers long Spotify resolve + retries)
-    await expect(page.locator('#analysisCard')).toBeVisible({ timeout: 60000 });
-    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 90000 });
+    await page.locator('#btnHomeCapture').click();
+    await page.setInputFiles('#fileInput', sampleImagePath);
+    await page.locator('#btnGeneratePlaylist').click();
+    await expect(page.locator('#screenPlaylist.screen--active')).toBeVisible({ timeout: 90000 });
+    await expect(page.locator('#analysisCard')).toBeVisible({ timeout: 10000 });
 
     // Playlist must be populated before export
     const trackCards = page.locator('#tracklistContainer .track-card');
@@ -129,14 +123,10 @@ test.describe('Playlist_pic Authed Features (Saving & Playback)', () => {
   });
 
   test('should load player widget when a track is clicked', async ({ page }) => {
-    // 1. Upload image and generate playlist
-    const fileInput = page.locator('#fileInput');
-    await fileInput.setInputFiles(sampleImagePath);
-
-    const generateBtn = page.locator('#btnGeneratePlaylist');
-    await expect(generateBtn).toBeVisible();
-    await generateBtn.click();
-    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 90000 });
+    await page.locator('#btnHomeCapture').click();
+    await page.setInputFiles('#fileInput', sampleImagePath);
+    await page.locator('#btnGeneratePlaylist').click();
+    await expect(page.locator('#screenPlaylist.screen--active')).toBeVisible({ timeout: 90000 });
 
     // 2. Verify no player widget is loaded initially
     const playerContainer = page.locator('#spotifyPlayerContainer');

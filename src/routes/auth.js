@@ -1,6 +1,7 @@
 import express from 'express';
 import db from '../config/db.js';
 import { getAuthUserId, getAuthUser } from '../utils/session.js';
+import { getRemainingToday } from '../utils/moments.js';
 
 const router = express.Router();
 
@@ -102,7 +103,8 @@ router.get('/me', async (req, res) => {
         email: user.email,
         avatarUrl: user.avatar_url,
         tier: user.tier,
-        tokens: user.tokens
+        tokens: user.tokens,
+        momentsRemainingToday: await getRemainingToday(db, user.id, user.tier)
       }
     });
   } catch (err) {

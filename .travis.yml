@@ -54,9 +54,7 @@ before_install:
 
 install:
   - npm ci
-  - npx prisma generate
-  # Schema history targets Supabase roles; sync current schema.prisma for CI instead of migrate deploy
-  - npx prisma db push --accept-data-loss --skip-generate
+  - npm run db:migrate
   - npx playwright install --with-deps chromium
 
 script:
