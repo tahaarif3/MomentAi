@@ -25,7 +25,10 @@ See `package.json`: `npm run dev`, `npm test`, `npm run db:migrate`, `npx prisma
 - Playwright waits on `#screenPlaylist.screen--active`, not `#analysisLoader` hidden (loader lives on inactive loading screen once playlist shows)
 - Test hooks: `#fileInput`, `#btnGeneratePlaylist`, `#analysisLoader`, `#tracklistContainer .track-card`, sr-only `#envContext` / `#emotionalVibe` / valence nodes
 
-### Test mode
+### Schema / migrations
 
-- `NODE_ENV=test`: synchronous playlist processing, mocked Gemini/Spotify, test users seeded **before** `app.listen()` in `src/server.js`
-- API tests use `Authorization: Bearer test_token` + `x-test-user-id` header (`src/utils/session.js`)
+- Source of truth: `npm run db:migrate` (`prisma migrate deploy`). Do **not** use `db push` in production.
+- Docker boots via `docker-entrypoint.sh`, which runs migrate (and baselines `0_init` if the DB already exists).
+- `src/utils/ensureSchema.js` also `ADD COLUMN IF NOT EXISTS` for `tracks` / `suggested_tracks` on non-test startup so history/worker do not crash if migrate was skipped once.
+- If a live DB already matches the pre-tracks schema and migrate fails on `0_init`, run once:
+  `npx prisma migrate resolve --applied 0_init && npm run db:migrate`

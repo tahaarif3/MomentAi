@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy · MomentAI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+  <div class="app-container legal-page">
+    <header class="app-header">
+      <a class="logo" href="/" aria-label="MomentAI home">
+        <span class="logo-mark" aria-hidden="true"></span>
+        <h1>MomentAI</h1>
+      </a>
+    </header>
+
+    <main class="legal-main">
+      <p class="mono eyebrow-amber">LEGAL</p>
+      <h2 class="legal-title">Privacy Policy</h2>
+      <p class="legal-updated mono">Last updated: July 16, 2026</p>
+
+      <section class="legal-section">
+        <h3>Overview</h3>
+        <p>MomentAI (“we”, “us”) turns photos you upload into mood-matched Spotify playlists. This policy explains what we collect, how we use it, and the choices you have.</p>
+      </section>
+
+      <section class="legal-section">
+        <h3>Information we collect</h3>
+        <ul>
+          <li><strong>Account data</strong> — email, display name, and auth provider details when you sign in (via Supabase).</li>
+          <li><strong>Photos you upload</strong> — images sent for mood analysis; we store them so you can reopen past moments.</li>
+          <li><strong>Generation metadata</strong> — vibe labels, genres, audio features, and tracklists tied to your account.</li>
+          <li><strong>Billing data</strong> — handled by Stripe; we store subscription tier and Stripe customer/subscription IDs, not full card numbers.</li>
+          <li><strong>Usage data</strong> — basic server logs (IP, timestamps, endpoints) for reliability and abuse prevention.</li>
+        </ul>
+      </section>
+
+      <section class="legal-section">
+        <h3>How we use information</h3>
+        <ul>
+          <li>Analyze uploaded photos (via Google Gemini) to recommend tracks.</li>
+          <li>Search and create playlists using the Spotify API.</li>
+          <li>Enforce free-tier daily limits and provide Plus billing.</li>
+          <li>Show your saved “Your Moments” history when signed in.</li>
+          <li>Improve reliability, security, and support.</li>
+        </ul>
+      </section>
+
+      <section class="legal-section">
+        <h3>Third-party services</h3>
+        <p>We use Supabase (auth), Google Gemini (image analysis), Spotify (music catalog / playlist save), Stripe (payments), and optionally S3-compatible storage for images. Their privacy policies apply to data they process on our behalf.</p>
+      </section>
+
+      <section class="legal-section">
+        <h3>Retention</h3>
+        <p>We keep account and generation records while your account is active. You may request deletion of your account and associated moments by contacting us. Uploaded images and playlists may remain until deletion is completed.</p>
+      </section>
+
+      <section class="legal-section">
+        <h3>Your choices</h3>
+        <ul>
+          <li>You can use the product without signing in for a limited anonymous generate flow; history is not saved until you create an account.</li>
+          <li>You can disconnect Spotify / manage billing via the app when subscribed.</li>
+          <li>Contact us to request access, correction, or deletion of personal data.</li>
+        </ul>
+      </section>
+
+      <section class="legal-section">
+        <h3>Contact</h3>
+        <p>Questions about this policy: <a class="footer-link" href="mailto:hello@momentai.app">hello@momentai.app</a></p>
+      </section>
+
+      <p class="legal-back"><a class="btn btn-secondary" href="/">← Back to MomentAI</a></p>
+    </main>
+
+    <footer class="app-footer">
+      <p>© 2026 MomentAI</p>
+      <div class="footer-links">
+        <a class="footer-link" href="/privacy.html">Privacy Policy</a>
+        <span aria-hidden="true">·</span>
+        <a class="footer-link" href="/terms.html">Terms of Service</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

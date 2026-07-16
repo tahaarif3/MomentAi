@@ -1984,13 +1984,79 @@ textarea.prompt-input {
 .moment-nudge-card { grid-column: 1 / -1; background: var(--surface); border: 1px dashed rgba(233,169,79,0.35); border-radius: 18px; padding: 24px; cursor: pointer; color: inherit; text-align: left; }
 .moments-empty { color: var(--text-muted); grid-column: 1 / -1; }
 
-.ticker-section { margin-top: 28px; opacity: 0.7; }
+.ticker-section { margin-top: 28px; opacity: 0.85; }
 .ticker-label { color: var(--text-muted); margin-bottom: 8px; }
-.ticker-strip { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface); border-radius: 18px; border: 1px solid rgba(236,231,223,0.06); pointer-events: none; }
-.ticker-demo-label { color: var(--text-muted); }
+.ticker-demo-inline { opacity: 0.7; }
+.ticker-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border-radius: 18px;
+  border: 1px solid rgba(236,231,223,0.06);
+  pointer-events: none;
+}
+.ticker-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.ticker-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ticker-demo-label { color: var(--text-muted); flex-shrink: 0; font-size: 11px; }
 .ticker-play { color: var(--accent); }
-.ticker-title { font-weight: 600; }
-.ticker-meta { color: var(--text-muted); margin-left: auto; }
+.ticker-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ticker-meta { color: var(--text-muted); font-size: 11px; }
+
+.home-prompt-section {
+  margin: 22px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.home-prompt-section .prompt-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.legal-page .legal-main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+}
+.legal-title {
+  font-size: clamp(28px, 5vw, 40px);
+  font-weight: 700;
+  margin: 8px 0 6px;
+}
+.legal-updated {
+  color: var(--text-muted);
+  margin-bottom: 28px;
+}
+.legal-section {
+  margin-bottom: 24px;
+}
+.legal-section h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.legal-section p,
+.legal-section li {
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 15px;
+}
+.legal-section ul {
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.legal-back {
+  margin-top: 36px;
+}
 
 .viewfinder-wrap { position: relative; border-radius: 26px; overflow: hidden; min-height: min(62vh, 560px); background: var(--surface-deep); }
 .viewfinder-video, .viewfinder-upload { width: 100%; height: min(62vh, 560px); object-fit: cover; display: block; }

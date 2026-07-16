@@ -1,13 +1,21 @@
 const DEMO_TICKER_ITEMS = [
-  { title: 'Golden hour rooftop', by: 'Maya', tracks: 24 },
-  { title: 'Rainy commute', by: 'Alex', tracks: 18 },
-  { title: 'Late night drive', by: 'Jordan', tracks: 22 },
-  { title: 'Coffee shop window', by: 'Sam', tracks: 15 },
-  { title: 'Sunday reset', by: 'Riley', tracks: 20 }
+  { title: 'Golden hour rooftop', by: 'Maya', tracks: 24, hue: 32 },
+  { title: 'Rainy commute', by: 'Alex', tracks: 18, hue: 210 },
+  { title: 'Late night drive', by: 'Jordan', tracks: 22, hue: 280 },
+  { title: 'Coffee shop window', by: 'Sam', tracks: 15, hue: 24 },
+  { title: 'Sunday reset', by: 'Riley', tracks: 20, hue: 150 },
+  { title: 'Neon alley walk', by: 'Chris', tracks: 21, hue: 320 },
+  { title: 'Soft morning light', by: 'Taylor', tracks: 16, hue: 45 }
 ];
 
 let tickerIndex = 0;
 let tickerTimer = null;
+
+/** Fake album-cover gradient from a hue seed (no external images). */
+function coverStyle(hue) {
+  const h2 = (hue + 40) % 360;
+  return `background: linear-gradient(145deg, hsl(${hue} 55% 42%), hsl(${h2} 40% 18%));`;
+}
 
 function formatMomentDate(dateStr) {
   const d = new Date(dateStr);
@@ -30,11 +38,14 @@ export function startDemoTicker(containerEl) {
   const render = () => {
     const item = DEMO_TICKER_ITEMS[tickerIndex % DEMO_TICKER_ITEMS.length];
     tickerIndex += 1;
+    const secondsAgo = 3 + ((tickerIndex * 7) % 40);
     containerEl.innerHTML = `
+      <div class="ticker-cover" style="${coverStyle(item.hue)}" aria-hidden="true"></div>
+      <div class="ticker-copy">
+        <span class="ticker-title">${escapeHtml(item.title)}</span>
+        <span class="ticker-meta mono">just generated · ${secondsAgo}s ago · ${item.tracks} tracks · by ${escapeHtml(item.by)}</span>
+      </div>
       <span class="ticker-demo-label">(demo)</span>
-      <span class="ticker-play" aria-hidden="true">▸</span>
-      <span class="ticker-title">${escapeHtml(item.title)}</span>
-      <span class="ticker-meta mono">by ${escapeHtml(item.by)} · ${item.tracks} tracks</span>
     `;
   };
 
