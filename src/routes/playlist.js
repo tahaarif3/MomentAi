@@ -11,6 +11,19 @@ import { uploadFile } from '../services/storageService.js';
 import { playlistQueue, connection } from '../config/queue.js';
 import { processPlaylistJob } from '../workers/playlistWorker.js';
 import { QueueEvents } from 'bullmq';
+import {
+  FREE_DAILY_LIMIT,
+  getRemainingToday,
+  trackLimitForTier,
+  startOfUtcDay
+} from '../utils/moments.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '../..');
+
+export { FREE_DAILY_LIMIT, getRemainingToday };
 
 const router = express.Router();
 
@@ -48,39 +61,104 @@ const upload = multer({
 });
 
 /**
- * Middleware to check and enforce token limits.
- * Allows anonymous generation, but blocks logged-in free users without tokens.
+ * Middleware: enforce 3 moments/day for free tier (UTC). Anonymous users pass through.
  */
-async function checkTokenLimit(req, res, next) {
+async function checkDailyLimit(req, res, next) {
   try {
     const userId = await getAuthUserId(req);
-    
-    // If not logged in, allow processing (anonymous users get blurred tracks in frontend)
-    if (!userId) {
-      return next();
-    }
+    if (!userId) return next();
 
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { tier: true, tokens: true }
+      select: { tier: true }
+    });
+    if (!user) return next();
+    if (user.tier === 'premium') return next();
+
+    const todayCount = await db.generation.count({
+      where: {
+        user_id: userId,
+        created_at: { gte: startOfUtcDay() }
+      }
     });
 
-    if (!user) {
-      return next();
-    }
-
-    if (user.tier === 'free' && user.tokens <= 0) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "You have run out of generation tokens. Please upgrade to Premium or purchase a token pack." 
+    if (todayCount >= FREE_DAILY_LIMIT) {
+      return res.status(403).json({
+        success: false,
+        code: 'DAILY_LIMIT',
+        remainingToday: 0,
+        message: 'You have used all 3 free moments for today. Upgrade to Plus for unlimited generations.'
       });
     }
 
     next();
   } catch (error) {
-    console.error("Error in checkTokenLimit middleware:", error);
+    console.error('Error in checkDailyLimit middleware:', error);
     next(error);
   }
+}
+
+function guessMimeFromPath(imagePath) {
+  const ext = path.extname(imagePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  return 'image/jpeg';
+}
+
+async function loadImageBytes(imagePath) {
+  if (!imagePath) throw new Error('Missing image path.');
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    const response = await fetch(imagePath);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch stored image: ${response.statusText}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const mimeType = response.headers.get('content-type') || guessMimeFromPath(imagePath);
+    return { buffer, mimeType };
+  }
+
+  const relative = imagePath.startsWith('/') ? imagePath.slice(1) : imagePath;
+  const localPath = path.resolve(projectRoot, relative);
+  const buffer = await fs.promises.readFile(localPath);
+  return { buffer, mimeType: guessMimeFromPath(imagePath) };
+}
+
+function generationToProcessResult(row) {
+  const tracks = Array.isArray(row.tracks) ? row.tracks : [];
+  const suggestedTracks = Array.isArray(row.suggested_tracks) ? row.suggested_tracks : [];
+  return {
+    success: true,
+    generationId: row.id,
+    imagePath: row.image_path,
+    metadata: {
+      dominantColorPalette: JSON.parse(row.dominant_colors),
+      environmentalContext: row.environmental_context,
+      emotionalVibe: row.emotional_vibe,
+      seedGenres: JSON.parse(row.seed_genres),
+      valence: row.valence,
+      energy: row.energy,
+      acousticness: row.acousticness
+    },
+    tracks,
+    suggestedTracks,
+    playlistUrl: row.playlist_url || null,
+    playlistName: row.playlist_name || null,
+    isAuthenticated: true
+  };
+}
+
+async function enqueueOrRunJob(jobData, res) {
+  if (process.env.NODE_ENV === 'test') {
+    const result = await processPlaylistJob(jobData);
+    return res.json(result);
+  }
+
+  const job = await playlistQueue.add('playlist-generation', jobData);
+  return res.status(202).json({
+    success: true,
+    jobId: job.id,
+    message: 'Playlist generation started.'
+  });
 }
 
 function filterUniqueTracks(tracks, excludeTracks = []) {
@@ -123,7 +201,7 @@ async function fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, ex
  * Accepts an image file, parses it via Gemini, fetches Spotify recommendations.
  * Works for both authenticated and anonymous users.
  */
-router.post('/process', upload.single('image'), checkTokenLimit, async (req, res) => {
+router.post('/process', upload.single('image'), checkDailyLimit, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "Please upload an image file." });
   }
@@ -131,6 +209,20 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
   const filePath = req.file.path;
   const mimeType = req.file.mimetype;
   const userId = await getAuthUserId(req);
+
+  if (process.env.NODE_ENV === 'test' && userId) {
+    await db.user.upsert({
+      where: { id: userId },
+      update: {},
+      create: {
+        id: userId,
+        display_name: 'Test User',
+        email: `${userId}@test.com`,
+        tier: userId === 'premium_test_user' ? 'premium' : 'free',
+        tokens: 10
+      }
+    });
+  }
 
   try {
     // 1. Ingestion: Read file buffer to send to Gemini
@@ -142,10 +234,7 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
     const webImagePath = await uploadFile(filePath, mimeType);
     console.log(`File uploaded successfully. Web URL/Path: ${webImagePath}`);
 
-    // Cleanup local temp file
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    // Remote storage (S3/R2) removes the temp file inside uploadFile; keep local uploads on disk for /uploads static + regenerate.
 
     // 3. Spotify Match Setup
     console.log("Using client credentials token for Spotify catalog search.");
@@ -171,15 +260,12 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
       }
     }
 
-    // 4. Token deduction (only if logged in) - Done early to prevent double-spending
+    // Token deduction removed — daily limit enforced in checkDailyLimit middleware
+
+    let userTier = 'free';
     if (userId) {
-      const user = await db.user.findUnique({ where: { id: userId } });
-      if (user && user.tier === 'free') {
-        await db.user.update({
-          where: { id: userId },
-          data: { tokens: { decrement: 1 } }
-        });
-      }
+      const user = await db.user.findUnique({ where: { id: userId }, select: { tier: true } });
+      if (user) userTier = user.tier;
     }
 
     const jobData = {
@@ -190,7 +276,8 @@ router.post('/process', upload.single('image'), checkTokenLimit, async (req, res
       userId,
       spotifyToken,
       webImagePath,
-      pastPlaylistIds
+      pastPlaylistIds,
+      trackLimit: trackLimitForTier(userTier)
     };
 
     // ─── Test Mode: Run Synchronously ──────────────────────────────────────────
@@ -496,30 +583,159 @@ router.post('/suggest-more', async (req, res) => {
 
 /**
  * Route: GET /api/playlist/history
- * Fetch past generated playlists for the logged in user
+ * Summary list of past moments + remaining free quota today.
  */
 router.get('/history', async (req, res) => {
   const userId = await getAuthUserId(req);
   if (!userId) {
-    return res.status(401).json({ success: false, message: "Unauthorized" });
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
   try {
-    const history = await db.generation.findMany({
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { tier: true }
+    });
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const historyRows = await db.generation.findMany({
       where: { user_id: userId },
-      orderBy: { created_at: 'desc' }
+      orderBy: { created_at: 'desc' },
+      select: {
+        id: true,
+        image_path: true,
+        playlist_name: true,
+        playlist_url: true,
+        emotional_vibe: true,
+        environmental_context: true,
+        created_at: true,
+        tracks: true
+      }
     });
 
-    // Parse JSON strings back to arrays
-    const formattedHistory = history.map(item => ({
-      ...item,
-      dominant_colors: JSON.parse(item.dominant_colors),
-      seed_genres: JSON.parse(item.seed_genres)
+    const history = historyRows.map((row) => ({
+      id: row.id,
+      image_path: row.image_path,
+      playlist_name: row.playlist_name,
+      playlist_url: row.playlist_url,
+      emotional_vibe: row.emotional_vibe,
+      environmental_context: row.environmental_context,
+      created_at: row.created_at,
+      track_count: Array.isArray(row.tracks) ? row.tracks.length : 0
     }));
 
-    res.json({ success: true, history: formattedHistory });
+    const remainingToday = await getRemainingToday(db, userId, user.tier);
+
+    res.json({ success: true, remainingToday, history });
   } catch (error) {
-    console.error("Failed to fetch history:", error);
+    console.error('Failed to fetch history:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Route: GET /api/playlist/generation/:id
+ * Full generation payload for reopening a saved moment in the UI.
+ */
+router.get('/generation/:id', async (req, res) => {
+  const userId = await getAuthUserId(req);
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  try {
+    const row = await db.generation.findFirst({
+      where: { id: req.params.id, user_id: userId }
+    });
+
+    if (!row) {
+      return res.status(404).json({ success: false, message: 'Moment not found.' });
+    }
+
+    res.json({ success: true, ...generationToProcessResult(row) });
+  } catch (error) {
+    console.error('Failed to fetch generation:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Route: POST /api/playlist/regenerate
+ * Premium-only: re-run generation from a stored moment photo.
+ */
+router.post('/regenerate', async (req, res) => {
+  const userId = await getAuthUserId(req);
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  const { generationId } = req.body || {};
+  if (!generationId) {
+    return res.status(400).json({ success: false, message: 'Missing generationId.' });
+  }
+
+  try {
+    if (process.env.NODE_ENV === 'test') {
+      await db.user.upsert({
+        where: { id: userId },
+        update: {},
+        create: {
+          id: userId,
+          display_name: 'Test User',
+          email: `${userId}@test.com`,
+          tier: userId === 'premium_test_user' ? 'premium' : 'free',
+          tokens: 10
+        }
+      });
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { tier: true }
+    });
+
+    if (!user || user.tier !== 'premium') {
+      return res.status(403).json({
+        success: false,
+        code: 'PLUS_REQUIRED',
+        message: 'Regenerate is a Plus feature. Upgrade to regenerate playlists.'
+      });
+    }
+
+    const generation = await db.generation.findFirst({
+      where: { id: generationId, user_id: userId }
+    });
+
+    if (!generation) {
+      return res.status(404).json({ success: false, message: 'Moment not found.' });
+    }
+
+    const { buffer, mimeType } = await loadImageBytes(generation.image_path);
+    const spotifyToken = await spotify.getClientCredentialsToken();
+
+    const pastPlaylistIds = [];
+    if (generation.playlist_id) {
+      pastPlaylistIds.push(generation.playlist_id);
+    }
+
+    const jobData = {
+      fileBufferBase64: buffer.toString('base64'),
+      mimeType,
+      fileName: path.basename(generation.image_path),
+      customPrompt: '',
+      userId,
+      spotifyToken,
+      webImagePath: generation.image_path,
+      pastPlaylistIds,
+      trackLimit: trackLimitForTier('premium')
+    };
+
+    console.log(`Regenerating playlist for generation ${generationId}...`);
+    return enqueueOrRunJob(jobData, res);
+  } catch (error) {
+    console.error('Error in regenerate route:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

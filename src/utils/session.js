@@ -16,9 +16,15 @@ export async function getAuthUserId(req) {
     return null;
   }
 
-  // In test mode, accept a known test token
-  if (process.env.NODE_ENV === 'test' && token === 'test_token') {
-    return 'test_user_id';
+  // In test mode: x-test-user-id header takes precedence over test_token
+  if (process.env.NODE_ENV === 'test') {
+    const testUserHeader = req.headers['x-test-user-id'];
+    if (testUserHeader && typeof testUserHeader === 'string') {
+      return testUserHeader;
+    }
+    if (token === 'test_token') {
+      return 'test_user_id';
+    }
   }
 
   if (!supabaseAdmin) {

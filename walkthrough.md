@@ -49,9 +49,11 @@ Here is a summary of the updated and new files in the project:
 ## Local Verification
 
 ### Step 1: Initialize Database
-Generate the client and push the schema locally if needed:
+Generate the Prisma client and apply migrations:
+
 ```bash
-cmd /c npx prisma generate
+npx prisma generate
+npm run db:migrate
 ```
 
 ### Step 2: Run End-to-End Tests

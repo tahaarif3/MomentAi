@@ -24,32 +24,24 @@ if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
-// Seed test user if in test environment
+// Seed test users before accepting traffic in test environment
 import db from './config/db.js';
-if (process.env.NODE_ENV === 'test') {
-  console.log("Seeding test user in database using Prisma...");
-  db.user.upsert({
-    where: { id: 'test_user_id' },
-    update: {
-      display_name: 'Test User',
-      email: 'test@example.com',
-      auth_provider: 'google',
-      tier: 'free',
-      tokens: 10
-    },
-    create: {
-      id: 'test_user_id',
-      display_name: 'Test User',
-      email: 'test@example.com',
-      auth_provider: 'google',
-      tier: 'free',
-      tokens: 10
-    }
-  }).then(() => {
-    console.log("Test user seeded successfully.");
-  }).catch(err => {
-    console.error("Failed to seed test user:", err);
-  });
+
+async function seedTestUsers() {
+  const testUsers = [
+    { id: 'test_user_id', display_name: 'Test User', email: 'test@example.com', auth_provider: 'google', tier: 'free', tokens: 10 },
+    { id: 'history_test_user', display_name: 'History Tester', email: 'history@test.com', auth_provider: 'email', tier: 'free', tokens: 10 },
+    { id: 'daily_limit_user', display_name: 'Daily Limit User', email: 'daily@test.com', auth_provider: 'email', tier: 'free', tokens: 10 },
+    { id: 'premium_test_user', display_name: 'Premium Tester', email: 'premium@test.com', auth_provider: 'email', tier: 'premium', tokens: 999 }
+  ];
+  console.log('Seeding test users in database using Prisma...');
+  await db.generation.deleteMany();
+  await Promise.all(testUsers.map((u) => db.user.upsert({
+    where: { id: u.id },
+    update: { display_name: u.display_name, email: u.email, auth_provider: u.auth_provider, tier: u.tier, tokens: u.tokens },
+    create: u
+  })));
+  console.log('Test users seeded successfully.');
 }
 
 // Middleware
@@ -135,6 +127,10 @@ app.use((err, req, res, next) => {
     message: err.message || "An unexpected server error occurred."
   });
 });
+
+if (process.env.NODE_ENV === 'test') {
+  await seedTestUsers();
+}
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`===============================================`);

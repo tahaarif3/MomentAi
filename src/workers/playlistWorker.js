@@ -6,6 +6,7 @@ import { uploadFile } from '../services/storageService.js';
 import * as spotify from '../clients/spotifyClient.js';
 import crypto from 'crypto';
 import fs from 'fs';
+import { slimTracks, FREE_TRACK_LIMIT } from '../utils/moments.js';
 
 // Helper to filter unique tracks
 function filterUniqueTracks(tracks, excludeTracks = []) {
@@ -52,7 +53,8 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
     spotifyToken,
     webImagePath,
     excludedSongs = [],
-    pastPlaylistIds = []
+    pastPlaylistIds = [],
+    trackLimit = FREE_TRACK_LIMIT
   } = jobData;
 
   const fileBuffer = Buffer.from(fileBufferBase64, 'base64');
@@ -174,11 +176,18 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
     }
   }
 
-  // 3. Finalization
+  // 3. Finalization — apply tier track cap before persist/return
   await updateProgressFn({ stage: 'finalizing', message: 'Finalizing your playlist...' });
   const generationId = crypto.randomUUID();
+  const cappedTracks = finalTracks.slice(0, trackLimit);
 
-  // Save generation logs to Database (only if user is logged in)
+  await updateProgressFn({ stage: 'finalizing', message: 'Adding more song ideas…' });
+  const suggestedTracks = await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, cappedTracks);
+
+  const slimmedTracks = slimTracks(cappedTracks);
+  const slimmedSuggested = slimTracks(suggestedTracks);
+
+  // Save generation (logged-in users only) — after tracks are resolved
   if (userId) {
     await db.generation.create({
       data: {
@@ -191,14 +200,12 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
         seed_genres: JSON.stringify(metadata.seedGenres),
         valence: metadata.valence,
         energy: metadata.energy,
-        acousticness: metadata.acousticness
+        acousticness: metadata.acousticness,
+        tracks: slimmedTracks,
+        suggested_tracks: slimmedSuggested
       }
     });
   }
-
-  // Fetch supplementary suggestions
-  await updateProgressFn({ stage: 'finalizing', message: 'Adding more song ideas…' });
-  const suggestedTracks = await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, finalTracks);
 
   return {
     success: true,
@@ -206,7 +213,7 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
     imagePath: webImagePath,
     metadata,
     isAuthenticated: !!userId,
-    tracks: finalTracks,
+    tracks: cappedTracks,
     suggestedTracks
   };
 }

@@ -2,71 +2,49 @@ import { test, expect } from '@playwright/test';
 import path from 'path';
 
 test.describe('Playlist_pic Custom Prompt E2E Tests', () => {
-  // Use committed fixture — uploads/* is gitignored and missing on Travis
   const sampleImagePath = path.resolve('tests/assets/beach.png');
 
-  test('should generate playlist suggestions successfully using an optional custom music prompt', async ({ page }) => {
+  async function openCapture(page) {
     await page.goto('/');
-    await expect(page).toHaveTitle(/Moment\.?AI/i);
+    await page.locator('#btnHomeCapture').click();
+    await expect(page.locator('#screenCapture.screen--active')).toBeVisible();
+  }
 
-    const promptInput = page.locator('#customTextPrompt');
-    await expect(promptInput).toBeVisible();
+  test('should generate playlist suggestions successfully using an optional custom music prompt', async ({ page }) => {
+    await openCapture(page);
 
     const testStyle = 'dark synthwave cyber metal';
-    await promptInput.fill(testStyle);
+    await page.locator('#customTextPrompt').fill(testStyle);
 
-    const fileInput = page.locator('#fileInput');
-    await fileInput.setInputFiles(sampleImagePath);
+    await page.setInputFiles('#fileInput', sampleImagePath);
+    await page.locator('#btnGeneratePlaylist').click();
 
-    const generateBtn = page.locator('#btnGeneratePlaylist');
-    await expect(generateBtn).toBeVisible();
-    await generateBtn.click();
+    await expect(page.locator('#screenPlaylist.screen--active')).toBeVisible({ timeout: 45000 });
+    await expect(page.locator('#tracklistContainer .track-card').first()).toBeVisible({ timeout: 10000 });
 
-    await expect(page.locator('#analysisCard')).toBeVisible();
-    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 45000 });
-
-    // Metadata lives in sr-only nodes — assert attached/content, not visibility
     await expect(page.locator('#colorTags .tag').first()).toBeAttached();
-    const envText = await page.locator('#envContext').textContent();
-    expect(envText).not.toBe('-');
+    expect(await page.locator('#envContext').textContent()).not.toBe('-');
 
-    const trackCards = page.locator('#tracklistContainer .track-card');
-    const trackCount = await trackCards.count();
-    console.log(`[TEST] Found ${trackCount} tracks with custom prompt: "${testStyle}"`);
-    expect(trackCount).toBeGreaterThan(0);
+    expect(await page.locator('#tracklistContainer .track-card').count()).toBeGreaterThan(0);
 
     const authCloseBtn = page.locator('#btnAuthGateClose');
     if (await authCloseBtn.isVisible()) {
       await authCloseBtn.click();
     }
 
-    await page.click('#btnResetImage');
-
-    const clearedPromptVal = await promptInput.inputValue();
-    expect(clearedPromptVal).toBe('');
-
-    await expect(page.locator('#uploadCard')).toBeVisible();
+    await page.locator('#btnPlaylistBack').click();
+    expect(await page.locator('#customTextPrompt').inputValue()).toBe('');
+    await expect(page.locator('#screenHome.screen--active')).toBeVisible();
   });
 
   test('should generate playlist suggestions successfully without a custom prompt (optional validation)', async ({ page }) => {
-    await page.goto('/');
+    await openCapture(page);
+    await page.setInputFiles('#fileInput', sampleImagePath);
+    await page.locator('#btnGeneratePlaylist').click();
+    await expect(page.locator('#screenPlaylist.screen--active')).toBeVisible({ timeout: 45000 });
+    await expect(page.locator('#tracklistContainer .track-card').first()).toBeVisible({ timeout: 10000 });
 
-    const fileInput = page.locator('#fileInput');
-    await fileInput.setInputFiles(sampleImagePath);
-
-    const generateBtn = page.locator('#btnGeneratePlaylist');
-    await expect(generateBtn).toBeVisible();
-    await generateBtn.click();
-
-    await expect(page.locator('#analysisCard')).toBeVisible();
-    await page.waitForSelector('#analysisLoader', { state: 'hidden', timeout: 45000 });
-
-    const envText = await page.locator('#envContext').textContent();
-    expect(envText).not.toBe('-');
-
-    const trackCards = page.locator('#tracklistContainer .track-card');
-    const trackCount = await trackCards.count();
-    console.log(`[TEST] Found ${trackCount} tracks without custom prompt (pure visual mapping)`);
-    expect(trackCount).toBeGreaterThan(0);
+    expect(await page.locator('#envContext').textContent()).not.toBe('-');
+    expect(await page.locator('#tracklistContainer .track-card').count()).toBeGreaterThan(0);
   });
 });

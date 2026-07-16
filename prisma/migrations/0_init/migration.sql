@@ -1,16 +1,25 @@
 -- CreateTable
 CREATE TABLE "users" (
-    "spotify_id" TEXT NOT NULL,
+    "id" TEXT NOT NULL,
     "display_name" TEXT,
     "email" TEXT,
-    "spotify_access_token" TEXT,
-    "spotify_refresh_token" TEXT,
-    "spotify_token_expires_at" BIGINT,
+    "avatar_url" TEXT,
+    "auth_provider" TEXT,
     "tier" TEXT NOT NULL DEFAULT 'free',
-    "tokens" INTEGER NOT NULL DEFAULT 3,
+    "tokens" INTEGER NOT NULL DEFAULT 10,
+    "stripe_customer_id" TEXT,
+    "stripe_subscription_id" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "users_pkey" PRIMARY KEY ("spotify_id")
+    CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "stripe_events" (
+    "event_id" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "stripe_events_pkey" PRIMARY KEY ("event_id")
 );
 
 -- CreateTable
@@ -33,5 +42,12 @@ CREATE TABLE "generations" (
     CONSTRAINT "generations_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateIndex
+CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_stripe_customer_id_key" ON "users"("stripe_customer_id");
+
 -- AddForeignKey
-ALTER TABLE "generations" ADD CONSTRAINT "generations_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("spotify_id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "generations" ADD CONSTRAINT "generations_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+

@@ -4,339 +4,268 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Moment.AI | Turn moments into music</title>
-  <meta name="description" content="Upload a photo or describe where you are. MomentAI reads the mood, the light, the pace — and curates a Spotify playlist that fits.">
+  <meta name="description" content="Capture a photo. MomentAI reads the mood and curates a Spotify playlist that fits.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="dark-theme">
   <div class="app-container">
     <header class="app-header">
-      <a class="logo" href="/" aria-label="MomentAI home">
+      <a class="logo" href="/" aria-label="MomentAI home" data-nav="home">
         <span class="logo-mark" aria-hidden="true"></span>
         <h1>MomentAI</h1>
       </a>
-
-      <nav class="header-nav landing-only" aria-label="Primary">
+      <nav class="header-nav" aria-label="Primary">
         <a href="#howItWorks" class="header-nav-link">How it works</a>
-        <a href="#uploadCard" class="header-nav-link">Moments</a>
+        <button type="button" class="btn-nav-plus" id="btnNavPlus">Plus</button>
       </nav>
-
-      <button class="btn-text header-new-analysis preview-only hidden" id="btnResetImage" type="button">
-        New analysis
-      </button>
-
       <div class="user-panel" id="userPanel">
-        <button class="btn btn-light" id="btnSignIn" type="button">Connect Spotify</button>
+        <button class="btn btn-nav-spotify" id="btnSignIn" type="button">Connect Spotify</button>
       </div>
     </header>
 
-    <main class="dashboard-grid">
-      <section class="panel-column left-panel" aria-label="Moment capture and analysis">
-        <div class="landing-stack animate-panel is-visible" id="landingStack">
-          <div class="landing-layout">
-            <div class="landing-hero-card">
-              <div class="landing-hero">
-                <p class="eyebrow">Turn moments into music</p>
-                <h2 class="hero-title">Every moment has a soundtrack. We find it.</h2>
-                <p class="hero-subtitle">Upload a photo or describe where you are. MomentAI reads the mood, the light, the pace — and curates a Spotify playlist that fits.</p>
-                <div class="hero-actions">
-                  <button class="btn btn-primary btn-upload-trigger" id="btnUploadMoment" type="button">
-                    Capture a moment
-                  </button>
-                  <a class="btn btn-secondary" href="#howItWorks">See how it works</a>
-                </div>
-              </div>
-            </div>
-
-            <div class="landing-upload-card surface-panel" id="uploadCard">
-              <div class="landing-drop-card">
-                <div class="moment-intro">
-                  <h2 class="moment-title">What's the moment?</h2>
-                  <p class="moment-sub">Show us or tell us — or both.</p>
-                </div>
-
-                <div class="drop-zone-outer">
-                  <div
-                    class="drop-zone"
-                    id="dropZone"
-                    role="button"
-                    tabindex="0"
-                    aria-controls="fileInput"
-                    aria-label="Drop a photo here, or press Enter to browse"
-                  >
-                    <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden>
-                    <div class="drop-zone-content" id="dropZoneContent">
-                      <div class="upload-icon-circle" aria-hidden="true">↑</div>
-                      <p class="drop-text-primary">Drop a photo here</p>
-                      <p class="drop-text-secondary">jpg / png / webp · we read light, color, setting</p>
-                    </div>
-                    <img id="uploadPreview" class="upload-preview-img hidden" alt="Selected moment photo preview">
-                  </div>
-                </div>
-
-                <div class="divider-or" role="separator" aria-label="and or">
-                  <span class="divider-line" aria-hidden="true"></span>
-                  <span class="divider-label">and / or</span>
-                  <span class="divider-line" aria-hidden="true"></span>
-                </div>
-
-                <div class="custom-prompt-container">
-                  <label for="customTextPrompt" class="prompt-label">Describe the moment</label>
-                  <textarea
-                    id="customTextPrompt"
-                    class="prompt-input prompt-textarea"
-                    rows="3"
-                    placeholder="Driving home along the coast, sun almost down, windows open…"
-                  ></textarea>
-                </div>
-
-                <div class="mood-chips" role="group" aria-label="Quick mood presets">
-                  <button type="button" class="mood-chip" data-chip="Golden hour">Golden hour</button>
-                  <button type="button" class="mood-chip" data-chip="Rainy commute">Rainy commute</button>
-                  <button type="button" class="mood-chip" data-chip="Night drive">Night drive</button>
-                  <button type="button" class="mood-chip" data-chip="Sunday reset">Sunday reset</button>
-                  <button type="button" class="mood-chip" data-chip="Deep focus">Deep focus</button>
-                </div>
-
-                <button class="btn btn-primary btn-generate btn-full hidden" id="btnGeneratePlaylist" type="button">
-                  Generate my soundtrack
-                </button>
-              </div>
+    <main class="app-main">
+      <!-- HOME -->
+      <section class="screen screen--active" data-screen="home" id="screenHome">
+        <div class="screen-inner screen-inner--narrow">
+          <div class="capture-hero-card" id="captureHeroCard">
+            <div class="capture-hero-preview photo-placeholder" aria-hidden="true"></div>
+            <div class="capture-hero-panel">
+              <p class="mono eyebrow-amber" id="homeEyebrow">GOLDEN HOUR · —</p>
+              <h2 class="hero-headline" id="homeHeadline">Catch the light.</h2>
+              <p class="hero-sub">One photo. One playlist. Yours.</p>
+              <button type="button" class="btn btn-primary btn-full" id="btnHomeCapture">Capture this moment</button>
+              <p class="mono hero-footnote" id="momentsCounter">3 of 3 free moments left today · <button type="button" class="link-amber" data-action="paywall">go unlimited ›</button></p>
             </div>
           </div>
 
-          <section class="how-it-works-card how-it-works" id="howItWorks" aria-labelledby="howItWorksTitle">
-            <p class="eyebrow">Process</p>
-            <h3 class="how-it-works-title" id="howItWorksTitle">How it works</h3>
-            <div class="steps-grid">
-              <article class="step-card stagger-enter">
-                <span class="step-badge" aria-hidden="true">01</span>
-                <div class="step-copy">
-                  <h4>Upload a photo</h4>
-                  <p>Snap or choose any moment — light, setting, and color become the signal.</p>
-                </div>
-              </article>
-              <article class="step-card stagger-enter">
-                <span class="step-badge" aria-hidden="true">02</span>
-                <div class="step-copy">
-                  <h4>Read the mood</h4>
-                  <p>We map energy, tempo cues, and atmosphere into a listening profile.</p>
-                </div>
-              </article>
-              <article class="step-card stagger-enter">
-                <span class="step-badge" aria-hidden="true">03</span>
-                <div class="step-copy">
-                  <h4>Get your playlist</h4>
-                  <p>Curated tracks you can preview, edit, and save straight to Spotify.</p>
-                </div>
-              </article>
+          <section class="moments-section" aria-labelledby="momentsSectionTitle">
+            <div class="section-head">
+              <h3 class="mono eyebrow-amber" id="momentsSectionTitle">YOUR MOMENTS</h3>
+              <span class="mono section-count" id="momentsCount">0 saved</span>
             </div>
+            <div class="moments-grid" id="momentsGrid"></div>
+          </section>
+
+          <section class="ticker-section" aria-label="Demo activity feed">
+            <p class="mono ticker-label">LIVE FROM THE COMMUNITY</p>
+            <div class="ticker-strip" id="demoTicker" aria-live="polite"></div>
+          </section>
+
+          <section class="how-it-works-compact" id="howItWorks">
+            <p class="mono eyebrow-amber">PROCESS</p>
+            <h3>How it works</h3>
+            <ol class="steps-compact">
+              <li>Capture a photo of your moment</li>
+              <li>We read the light, mood &amp; pace</li>
+              <li>Get a curated Spotify playlist</li>
+            </ol>
           </section>
         </div>
+      </section>
 
-        <div class="analysis-card surface-panel animate-panel hidden" id="analysisCard">
-          <div class="analysis-layout">
-            <div class="card-section card-section--media">
-              <div class="visual-player-source">
-                <img id="sourceImagePreview" src="" alt="Uploaded source picture">
-                <div class="analysis-overlay hidden" id="analysisLoader" role="status" aria-live="polite" aria-busy="true">
-                  <div class="scan-bar" aria-hidden="true"></div>
-                  <div class="spinner" aria-hidden="true"></div>
-                  <p id="loaderProgressText">Reading the moment…</p>
-                </div>
+      <!-- CAPTURE -->
+      <section class="screen" data-screen="capture" id="screenCapture">
+        <div class="screen-inner screen-inner--narrow">
+          <div class="viewfinder-wrap">
+            <video class="viewfinder-video hidden" id="viewfinderVideo" playsinline muted autoplay></video>
+            <div class="viewfinder-upload photo-placeholder" id="viewfinderUpload">
+              <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden>
+              <div class="drop-zone-content" id="dropZoneContent">
+                <p class="drop-text-primary">Drop a photo or tap to browse</p>
+                <p class="drop-text-secondary mono">jpg / png / webp</p>
               </div>
+              <img id="uploadPreview" class="upload-preview-img hidden" alt="Selected moment preview">
             </div>
-
-            <div class="card-section card-section--meta aesthetic-preview">
-              <p class="eyebrow">Reading the moment</p>
-              <h2 class="aesthetic-title" id="aestheticTitle">Warm light, slow pace</h2>
-
-              <div class="stat-grid metric-row" role="list">
-                <div class="stat-card" role="listitem">
-                  <span class="stat-label">Mood</span>
-                  <span class="stat-value metric-pill" id="metricMood">—</span>
-                </div>
-                <div class="stat-card" role="listitem">
-                  <span class="stat-label">Energy</span>
-                  <span class="stat-value metric-pill" id="metricEnergy">—</span>
-                </div>
-                <div class="stat-card" role="listitem">
-                  <span class="stat-label">Tempo feel</span>
-                  <span class="stat-value" id="metricTempo">—</span>
-                </div>
-                <div class="stat-card" role="listitem">
-                  <span class="stat-label">Palette</span>
-                  <div class="color-swatches" id="colorSwatches" aria-label="Extracted color palette"></div>
-                </div>
-              </div>
-
-              <div class="genre-chip-row" id="genresLabel" aria-label="Recommended genres"></div>
-
-              <div class="curation-progress" aria-hidden="true">
-                <div class="curation-progress-meta">
-                  <span>Curating tracks…</span>
-                  <span class="mono" id="curationCount">—</span>
-                </div>
-                <div class="progress-track">
-                  <div class="progress-fill" id="curationFill"></div>
-                </div>
-              </div>
+            <button type="button" class="btn-back-circle" id="btnCaptureBack" aria-label="Back">‹</button>
+            <div class="selfie-pip hidden">
+              <video id="selfieVideo" playsinline muted autoplay></video>
+              <span class="mono selfie-label">you</span>
             </div>
+            <p class="viewfinder-caption mono">no retakes · this is the moment</p>
           </div>
 
-          <div class="metadata-results sr-only" id="metadataResults" aria-hidden="true">
-            <div class="vibe-group">
-              <h3>Color Palette</h3>
-              <div class="tag-container" id="colorTags"></div>
+          <div class="mood-chips" role="group" aria-label="Quick mood presets">
+            <button type="button" class="mood-chip" data-chip="Golden hour">golden hour</button>
+            <button type="button" class="mood-chip" data-chip="Night drive">night drive</button>
+            <button type="button" class="mood-chip" data-chip="Coffee run">coffee run</button>
+          </div>
+
+          <textarea id="customTextPrompt" class="sr-only" aria-hidden="true" tabindex="-1"></textarea>
+
+          <button type="button" class="btn-shutter" id="btnShutter" aria-label="Capture photo">
+            <span class="btn-shutter-core"></span>
+          </button>
+          <button type="button" class="btn btn-primary btn-full hidden" id="btnGeneratePlaylist">Generate my soundtrack</button>
+          <p class="mono capture-footnote">tap to capture · we'll read the light, mood + pace</p>
+          <button type="button" class="btn-text upload-fallback-link" id="btnUploadInstead">upload a photo instead</button>
+        </div>
+      </section>
+
+      <!-- LOADING -->
+      <section class="screen" data-screen="loading" id="screenLoading">
+        <div class="loading-stage">
+          <div class="loading-blob loading-blob--blue" aria-hidden="true"></div>
+          <div class="loading-blob loading-blob--amber" aria-hidden="true"></div>
+          <div class="loading-blob loading-blob--brown" aria-hidden="true"></div>
+          <div class="loading-copy">
+            <h2 class="loading-title">Reading the moment…</h2>
+            <p class="loading-sub" id="loadingSubcopy">Curating tracks…</p>
+          </div>
+          <div class="loading-ring" aria-hidden="true"></div>
+          <div class="loading-status">
+            <div class="analysis-overlay" id="analysisLoader" role="status" aria-live="polite" aria-busy="true">
+              <p id="loaderProgressText" class="loading-pill">Reading the light…</p>
+              <p class="mono loading-pct" id="loadingPct">0% · matching to spotify</p>
             </div>
-            <div class="vibe-group">
-              <h3>Environment</h3>
-              <p class="vibe-text-val" id="envContext">-</p>
-            </div>
-            <div class="vibe-group">
-              <h3>Mood Profile</h3>
-              <p class="vibe-text-val" id="emotionalVibe">-</p>
-            </div>
-            <div class="vibe-group">
-              <h3>Recommended Genres</h3>
-              <div class="tag-container" id="genreTags"></div>
-            </div>
-            <div class="vibe-group">
-              <div class="slider-group">
-                <div class="slider-item">
-                  <span id="valValence">0.50</span>
-                  <div class="slider-track-fill"><div class="slider-fill-bar" id="barValence" style="width: 50%;"></div></div>
-                </div>
-                <div class="slider-item">
-                  <span id="valEnergy">0.50</span>
-                  <div class="slider-track-fill"><div class="slider-fill-bar" id="barEnergy" style="width: 50%;"></div></div>
-                </div>
-                <div class="slider-item">
-                  <span id="valAcousticness">0.50</span>
-                  <div class="slider-track-fill"><div class="slider-fill-bar" id="barAcousticness" style="width: 50%;"></div></div>
-                </div>
-              </div>
+            <div class="curation-progress sr-only" aria-hidden="true">
+              <div class="progress-fill" id="curationFill"></div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="panel-column right-panel animate-panel" aria-label="Generated playlist">
-        <div class="playlist-card surface-panel">
-          <div class="card-section card-section--header">
-            <div class="card-header playlist-header-actions">
-              <div>
-                <p class="eyebrow">Generated from your moment</p>
-                <h2>Your playlist</h2>
-                <p id="playlistStatusText">Upload a moment photo to generate tracks instantly.</p>
+      <!-- PLAYLIST -->
+      <section class="screen" data-screen="playlist" id="screenPlaylist">
+        <div class="screen-inner screen-inner--playlist">
+          <button type="button" class="btn-back-text" id="btnPlaylistBack">‹ Back</button>
+          <p class="mono eyebrow-amber" id="playlistEyebrow">your moment</p>
+
+          <div class="playlist-header-row">
+            <div class="playlist-cover photo-placeholder" id="playlistCover"></div>
+            <div class="playlist-header-copy">
+              <h2 class="playlist-title" id="aestheticTitle">Your playlist</h2>
+              <p class="mono playlist-meta" id="playlistMetaLine">—</p>
+              <p id="playlistStatusText" class="playlist-status">Upload a moment to generate tracks.</p>
+            </div>
+          </div>
+
+          <div class="playlist-actions">
+            <button class="btn btn-primary" id="btnSavePlaylist" type="button">Save to Spotify</button>
+            <button class="btn btn-secondary" id="btnShareCard" type="button">Share card</button>
+            <button class="btn btn-secondary" id="btnRegenerate" type="button">Regenerate</button>
+            <button class="btn btn-secondary hidden" id="btnNewPhoto" type="button">New moment</button>
+            <button class="btn-text preview-only hidden" id="btnResetImage" type="button">New analysis</button>
+          </div>
+
+          <div class="spotify-embed-container animate-panel hidden" id="spotifyPlayerContainer"></div>
+
+          <div class="playlist-tracks-panel">
+            <div class="tracklist-container" id="tracklistContainer">
+              <div class="tracklist-placeholder">
+                <p>Your tracks will appear here after generation.</p>
               </div>
             </div>
           </div>
 
-          <hr class="section-divider" aria-hidden="true">
-
-          <div class="card-section card-section--player">
-            <div class="spotify-embed-container animate-panel hidden" id="spotifyPlayerContainer"></div>
-          </div>
-
-          <div class="card-section card-section--tracks playlist-editor">
-            <div class="playlist-tracks-panel">
-              <div class="tracklist-head" aria-hidden="true">
-                <span>#</span>
-                <span></span>
-                <span>Title</span>
-                <span class="track-head-artist">Artist</span>
-                <span class="track-head-time">Time</span>
-                <span></span>
-              </div>
-              <div class="tracklist-container" id="tracklistContainer">
-                <div class="tracklist-placeholder">
-                  <div class="placeholder-icon" aria-hidden="true">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="svg-icon" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-                  </div>
-                  <p>Upload a moment photo to generate tracks instantly.</p>
-                </div>
-              </div>
+          <div class="suggestions-panel hidden" id="suggestionsPanel">
+            <div class="suggestions-header">
+              <p class="playlist-section-label mono">ADD MORE SONGS</p>
+              <button type="button" class="btn-text btn-load-more hidden" id="btnLoadMoreSuggestions">Load more</button>
             </div>
+            <div class="suggestions-list" id="suggestionsList"></div>
+          </div>
+        </div>
+      </section>
 
-            <div class="suggestions-panel hidden" id="suggestionsPanel">
-              <div class="suggestions-header">
-                <p class="playlist-section-label">Add more songs</p>
-                <button type="button" class="btn-text btn-load-more hidden" id="btnLoadMoreSuggestions">Load more</button>
-              </div>
-              <div class="suggestions-list" id="suggestionsList"></div>
+      <!-- SHARE -->
+      <section class="screen" data-screen="share" id="screenShare">
+        <div class="screen-inner screen-inner--narrow">
+          <button type="button" class="btn-back-text" id="btnShareBack">‹ Back</button>
+          <p class="mono eyebrow-amber">share your moment</p>
+          <div id="shareCardMount"></div>
+          <div class="share-actions">
+            <button type="button" class="btn btn-primary" id="btnDownloadShare">Download image</button>
+            <button type="button" class="btn btn-secondary" id="btnCopyShareLink">Copy link</button>
+            <button type="button" class="btn btn-secondary" id="btnInstagramStory">Instagram story</button>
+          </div>
+          <p class="mono share-footnote">anyone with the link can listen — no account needed</p>
+        </div>
+      </section>
+
+      <!-- PAYWALL -->
+      <section class="screen" data-screen="paywall" id="screenPaywall">
+        <div class="screen-inner screen-inner--paywall">
+          <button type="button" class="btn-back-text" id="btnPaywallBack">‹ Back</button>
+          <p class="mono eyebrow-amber">momentai plus</p>
+          <h2 class="paywall-headline">Unlimited soundtracks.</h2>
+          <p class="paywall-sub">Every moment you catch, scored. No daily cap.</p>
+          <div class="plan-cards">
+            <div class="plan-card">
+              <h3>Free</h3>
+              <p class="plan-price">$0 <span>/ forever</span></p>
+              <ul class="plan-features">
+                <li>3 moments per day</li>
+                <li>15-track playlists</li>
+                <li>Standard photo read</li>
+                <li>Watermarked share cards</li>
+              </ul>
+              <button type="button" class="btn btn-secondary btn-full" disabled>Current plan</button>
+            </div>
+            <div class="plan-card plan-card--plus">
+              <span class="plan-badge mono">7 DAYS FREE</span>
+              <h3>Plus</h3>
+              <p class="plan-price">$3.99 <span>/ month</span></p>
+              <ul class="plan-features">
+                <li><strong>Unlimited</strong> moments</li>
+                <li>24+ track playlists</li>
+                <li>Regenerate &amp; fine-tune</li>
+                <li>Premium unwatermarked cards</li>
+              </ul>
+              <button type="button" class="btn btn-primary btn-full" id="btnBuyPremium">Start 7 days free</button>
+              <button type="button" class="btn btn-secondary btn-full hidden" id="btnManageBilling">Manage billing</button>
             </div>
           </div>
-
-          <hr class="section-divider section-divider--actions" aria-hidden="true">
-
-          <div class="card-section card-section--actions">
-            <div class="playlist-ctas preview-ctas">
-              <button class="btn btn-secondary hidden" id="btnNewPhoto" type="button">Regenerate</button>
-              <button class="btn btn-primary hidden" id="btnSavePlaylist" type="button">Save to Spotify</button>
-            </div>
-          </div>
+          <p class="mono paywall-footnote">cancel anytime · your playlists stay yours</p>
         </div>
       </section>
     </main>
 
-    <div class="modal-backdrop animate-modal hidden" id="tokenModal" role="dialog" aria-modal="true" aria-labelledby="tokenModalTitle">
-      <div class="modal-content surface-panel">
-        <button class="modal-close" id="btnTokenClose" type="button" aria-label="Close upgrade dialog">&times;</button>
-        <h2 id="tokenModalTitle">Upgrade your MomentAI experience</h2>
-        <p class="modal-subtitle">You have used all your complimentary free generations. Choose a plan to continue generating.</p>
-
-        <div class="modal-grids">
-          <div class="pricing-card">
-            <span class="badge-coming-soon">Coming soon</span>
-            <h3>Token Pack</h3>
-            <div class="price">$1.99<span>/ 20 tokens</span></div>
-            <p class="pricing-desc">Perfect for casual curators. Buy generations on-demand.</p>
-            <ul class="pricing-features">
-              <li>20 playlist generations</li>
-              <li>Standard image processing</li>
-              <li>Standard recommendation engine</li>
-            </ul>
-            <button class="btn btn-secondary btn-full" id="btnBuyTokens" type="button" disabled>Coming soon</button>
-          </div>
-
-          <div class="pricing-card featured">
-            <span class="badge-featured">Coming soon</span>
-            <h3>Premium Pass</h3>
-            <div class="price">$3.99<span>/ month</span></div>
-            <p class="pricing-desc">For true audiophiles. Curate without boundaries.</p>
-            <ul class="pricing-features">
-              <li><strong>Unlimited</strong> playlist generations</li>
-              <li>Custom AI-generated cover art</li>
-              <li>Advanced mood toggles</li>
-              <li>Ad-free experience</li>
-            </ul>
-            <button class="btn btn-primary btn-full" id="btnBuyPremium" type="button" disabled>Coming soon</button>
-          </div>
-        </div>
+    <img id="sourceImagePreview" class="sr-only" alt="Source moment">
+    <div class="analysis-card sr-only" id="analysisCard">
+      <div class="metadata-results" id="metadataResults">
+        <div class="vibe-group"><div class="tag-container" id="colorTags"></div></div>
+        <p class="vibe-text-val" id="envContext">-</p>
+        <p class="vibe-text-val" id="emotionalVibe">-</p>
+        <div class="tag-container" id="genreTags"></div>
+        <span id="valValence">0.50</span>
+        <span id="valEnergy">0.50</span>
+        <span id="valAcousticness">0.50</span>
+        <div class="slider-fill-bar" id="barValence"></div>
+        <div class="slider-fill-bar" id="barEnergy"></div>
+        <div class="slider-fill-bar" id="barAcousticness"></div>
+        <span class="metric-pill" id="metricMood"></span>
+        <span class="metric-pill" id="metricEnergy"></span>
+        <span id="metricTempo"></span>
+        <div class="color-swatches" id="colorSwatches"></div>
+        <div class="genre-chip-row" id="genresLabel"></div>
+        <span id="curationCount"></span>
       </div>
     </div>
 
-    <div class="modal-backdrop animate-modal auth-gate-backdrop hidden" id="signInGateModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <button type="button" class="floating-shutter" id="btnFloatingShutter" aria-label="Open camera">
+      <span class="floating-shutter-core"></span>
+    </button>
+
+    <!-- Modals -->
+    <div class="modal-backdrop animate-modal hidden" id="signInGateModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
       <div class="modal-content surface-panel auth-gate-modal-content">
-        <button class="modal-close" id="btnAuthGateClose" type="button" aria-label="Close sign in dialog">&times;</button>
+        <button class="modal-close" id="btnAuthGateClose" type="button" aria-label="Close">&times;</button>
         <h2 id="authModalTitle">Sign in to MomentAI</h2>
         <p class="modal-subtitle">See the full playlist, save to Spotify, and track your history.</p>
-
         <form id="authForm" class="save-modal-form">
           <div class="form-group">
-            <label for="authEmail">Email address</label>
-            <input type="email" id="authEmail" class="prompt-input" placeholder="you@example.com" required autocomplete="email">
+            <label for="authEmail">Email</label>
+            <input type="email" id="authEmail" class="prompt-input" required autocomplete="email">
           </div>
           <div class="form-group">
             <label for="authPassword">Password</label>
-            <input type="password" id="authPassword" class="prompt-input" placeholder="••••••••" required autocomplete="current-password">
+            <input type="password" id="authPassword" class="prompt-input" required autocomplete="current-password">
           </div>
           <button type="submit" class="btn btn-primary btn-full" id="btnSubmitAuth">Sign in</button>
         </form>
-
         <div class="auth-toggle-row">
           <span id="authToggleText">Don't have an account?</span>
           <button class="btn-text" id="btnToggleAuthMode" type="button">Sign up</button>
@@ -344,32 +273,25 @@
       </div>
     </div>
 
-    <div class="modal-backdrop animate-modal hidden" id="savePlaylistModal" role="dialog" aria-modal="true" aria-labelledby="savePlaylistTitle">
+    <div class="modal-backdrop animate-modal hidden" id="savePlaylistModal" role="dialog" aria-modal="true">
       <div class="modal-content surface-panel save-modal-content">
-        <button class="modal-close" id="btnSavePlaylistClose" type="button" aria-label="Close save playlist dialog">&times;</button>
+        <button class="modal-close" id="btnSavePlaylistClose" type="button" aria-label="Close">&times;</button>
         <h2 id="savePlaylistTitle">Save playlist to Spotify</h2>
-        <p class="modal-subtitle">Configure your playlist before exporting it to your library.</p>
-
         <div class="save-modal-form">
           <div class="form-group">
             <label for="modalPlaylistName">Playlist name</label>
-            <input type="text" id="modalPlaylistName" class="prompt-input" placeholder="e.g. Golden Hour Drift" required>
+            <input type="text" id="modalPlaylistName" class="prompt-input" required>
           </div>
-
           <div class="form-group">
             <label for="modalPlaylistDescription">Description</label>
-            <textarea id="modalPlaylistDescription" class="prompt-input" rows="3" placeholder="Curated from your moment…"></textarea>
+            <textarea id="modalPlaylistDescription" class="prompt-input" rows="3"></textarea>
           </div>
-
-          <div class="form-row">
-            <div class="form-group checkbox-group">
-              <label class="checkbox-label">
-                <input type="checkbox" id="modalUploadCover" checked>
-                <span>Upload source image as playlist cover art</span>
-              </label>
-            </div>
+          <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="modalUploadCover" checked>
+              <span>Upload source image as cover art</span>
+            </label>
           </div>
-
           <div class="modal-actions">
             <button class="btn btn-secondary" id="btnCancelSave" type="button">Cancel</button>
             <button class="btn btn-primary" id="btnConfirmSave" type="button">Export to Spotify</button>
@@ -378,13 +300,11 @@
       </div>
     </div>
 
-    <div class="modal-backdrop animate-modal hidden" id="successModal" role="dialog" aria-modal="true" aria-labelledby="successTitle">
+    <div class="modal-backdrop animate-modal hidden" id="successModal" role="dialog" aria-modal="true">
       <div class="modal-content surface-panel success-modal-content">
-        <button class="modal-close" id="btnSuccessClose" type="button" aria-label="Close success dialog">&times;</button>
-        <div class="success-icon-badge" aria-hidden="true">✓</div>
+        <button class="modal-close" id="btnSuccessClose" type="button" aria-label="Close">&times;</button>
         <h2 id="successTitle">Playlist created</h2>
-        <p class="modal-subtitle" id="successModalText">Your playlist is ready. Open it on Spotify and hit Save to add it to your library.</p>
-
+        <p class="modal-subtitle" id="successModalText">Your playlist is ready.</p>
         <div class="modal-actions success-actions">
           <button class="btn btn-secondary" id="btnSuccessCloseAction" type="button">Close</button>
           <a class="btn btn-primary" id="linkOpenSpotify" href="#" target="_blank" rel="noopener noreferrer">Open in Spotify</a>
@@ -392,13 +312,12 @@
       </div>
     </div>
 
-    <div class="modal-backdrop animate-modal hidden" id="errorModal" role="dialog" aria-modal="true" aria-labelledby="errorTitle">
+    <div class="modal-backdrop animate-modal hidden" id="errorModal" role="dialog" aria-modal="true">
       <div class="modal-content surface-panel error-modal-content">
-        <button class="modal-close" id="btnErrorClose" type="button" aria-label="Close error dialog">&times;</button>
-        <div class="error-icon-badge" id="errorIconBadge" aria-hidden="true">!</div>
+        <button class="modal-close" id="btnErrorClose" type="button" aria-label="Close">&times;</button>
+        <div class="error-icon-badge" id="errorIconBadge">!</div>
         <h2 id="errorTitle">Something went wrong</h2>
-        <p class="modal-subtitle" id="errorMessage">We hit a snag generating your playlist. Please try again.</p>
-
+        <p class="modal-subtitle" id="errorMessage">Please try again.</p>
         <div class="modal-actions error-actions">
           <button class="btn btn-secondary" id="btnErrorDismiss" type="button">Close</button>
           <button class="btn btn-primary" id="btnErrorRetry" type="button">Try again</button>
@@ -408,11 +327,6 @@
 
     <footer class="app-footer">
       <p>© 2026 MomentAI</p>
-      <div class="footer-links">
-        <a href="https://github.com/tahaarif3/MomentAi/issues" target="_blank" rel="noopener noreferrer" class="footer-link">Report a bug</a>
-        <span aria-hidden="true">·</span>
-        <a href="https://github.com/tahaarif3/MomentAi/issues" target="_blank" rel="noopener noreferrer" class="footer-link">Suggest a feature</a>
-      </div>
     </footer>
   </div>
 
