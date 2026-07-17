@@ -186,7 +186,8 @@ const gracefulShutdown = async (signal) => {
     }
 
     try {
-      const { connection } = await import('./config/queue.js');
+      const { connection, playlistQueueEvents } = await import('./config/queue.js');
+      await playlistQueueEvents?.close();
       await connection.quit();
       console.log('[Redis] Connection closed.');
     } catch (err) {

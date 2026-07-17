@@ -68,3 +68,22 @@ export function slimTrack(track) {
 export function slimTracks(tracks) {
   return (tracks || []).map(slimTrack).filter(Boolean);
 }
+
+/** Extract compact, prompt-safe repeat exclusions from persisted Spotify tracks. */
+export function trackExclusions(tracks, limit = 50) {
+  const seen = new Set();
+  const exclusions = [];
+  for (const track of tracks || []) {
+    const title = track?.name?.trim();
+    const artist = track?.artists?.[0]?.name?.trim();
+    if (!title) continue;
+    const value = `${title} by ${artist || ''}`;
+    const key = value.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      exclusions.push(value);
+    }
+    if (exclusions.length >= limit) break;
+  }
+  return exclusions;
+}

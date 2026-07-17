@@ -1,12 +1,11 @@
-import { Worker } from 'bullmq';
+import { Worker, UnrecoverableError } from 'bullmq';
 import { connection } from '../config/queue.js';
 import db from '../config/db.js';
 import { parsePlaylistImage } from '../services/geminiService.js';
-import { uploadFile } from '../services/storageService.js';
 import * as spotify from '../clients/spotifyClient.js';
 import crypto from 'crypto';
-import fs from 'fs';
 import { slimTracks, FREE_TRACK_LIMIT } from '../utils/moments.js';
+import { loadImageBytes } from '../utils/image.js';
 
 // Helper to filter unique tracks
 function filterUniqueTracks(tracks, excludeTracks = []) {
@@ -45,20 +44,20 @@ async function fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, ex
 // Core processing logic that runs inside the worker (and inline in tests)
 export async function processPlaylistJob(jobData, updateProgressFn = async () => {}) {
   const {
-    fileBufferBase64,
-    mimeType,
+    sourceImagePath,
     fileName,
     customPrompt,
     userId,
-    spotifyToken,
     webImagePath,
     imageThumb = null,
     excludedSongs = [],
-    pastPlaylistIds = [],
     trackLimit = FREE_TRACK_LIMIT
   } = jobData;
 
-  const fileBuffer = Buffer.from(fileBufferBase64, 'base64');
+  // Queue jobs contain a durable image path, not the original image bytes.
+  // This keeps Redis payloads small even for 10 MB uploads and retries.
+  const { buffer: fileBuffer, mimeType } = await loadImageBytes(sourceImagePath);
+  const spotifyToken = await spotify.getClientCredentialsToken();
 
   // Check rate limit before starting
   const rateLimitTime = spotify.getRateLimitResetTime();
@@ -67,36 +66,9 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
     throw new Error(`RATE_LIMIT_ACTIVE:${delayMs}`);
   }
 
-  // Resolve repeat recommendation playlist history in background
-  const finalExcludedSongs = [...excludedSongs];
-  if (pastPlaylistIds && pastPlaylistIds.length > 0) {
-    console.log(`[Worker] Resolving history for ${pastPlaylistIds.length} playlists...`);
-    for (const playlistId of pastPlaylistIds) {
-      try {
-        let readToken = spotifyToken;
-        try {
-          readToken = await spotify.getMasterAccountToken();
-        } catch (tokenErr) {
-          console.warn("[Worker] Failed to get master account token, falling back to client credentials:", tokenErr);
-        }
-        const tracks = await spotify.getPlaylistTracks(readToken, playlistId);
-        if (tracks) {
-          for (const track of tracks) {
-            if (track && track.name) {
-              finalExcludedSongs.push(`${track.name} by ${track.artists?.[0]?.name || ''}`);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[Worker] Failed to resolve tracks for past playlist ${playlistId}:`, err);
-      }
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-
   // 1. LLM Parsing
   await updateProgressFn({ stage: 'analyzing', message: 'Analyzing visual energy with Gemini...' });
-  const metadata = await parsePlaylistImage(fileBuffer, mimeType, customPrompt, fileName, finalExcludedSongs.slice(0, 50));
+  const metadata = await parsePlaylistImage(fileBuffer, mimeType, customPrompt, fileName, excludedSongs.slice(0, 50));
   console.log("Gemini parsed metadata:", JSON.stringify(metadata, null, 2));
 
   // Check rate limit after Gemini
@@ -182,8 +154,11 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
   const generationId = crypto.randomUUID();
   const cappedTracks = finalTracks.slice(0, trackLimit);
 
-  await updateProgressFn({ stage: 'finalizing', message: 'Adding more song ideas…' });
-  const suggestedTracks = await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, cappedTracks);
+  // Free generations do not need a second Spotify search pool. Premium users
+  // retain the extra discovery tracks as part of their higher-value experience.
+  const suggestedTracks = trackLimit > FREE_TRACK_LIMIT
+    ? await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, cappedTracks)
+    : [];
 
   const slimmedTracks = slimTracks(cappedTracks);
   const slimmedSuggested = slimTracks(suggestedTracks);
@@ -223,6 +198,23 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
 
 let worker = null;
 
+function isRetryableJobError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return [
+    'gemini_overloaded',
+    'rate_limit_active',
+    'spotify api rate limit',
+    'rate limit',
+    'resource_exhausted',
+    '429',
+    '503',
+    'fetch failed',
+    'econnreset',
+    'etimedout',
+    'eai_again'
+  ].some((needle) => message.includes(needle));
+}
+
 // Initialize worker in non-test environments
 if (process.env.NODE_ENV !== 'test') {
   worker = new Worker('playlist-generation', async (job) => {
@@ -239,10 +231,10 @@ if (process.env.NODE_ENV !== 'test') {
       console.log(`[Worker] Completed job ${job.id}.`);
       return result;
     } catch (err) {
-      // Normalize overload signals so queue retry backoff applies cleanly
-      if (err?.message?.startsWith('GEMINI_OVERLOADED:')) {
-        const userMsg = err.message.replace(/^GEMINI_OVERLOADED:/, '');
-        throw new Error(`Failed to parse image with Gemini Flash: ${userMsg}`);
+      if (!isRetryableJobError(err)) {
+        // Configuration, validation, and missing-object errors cannot succeed
+        // on retry, so do not multiply queue operations for them.
+        throw new UnrecoverableError(err?.message || 'Playlist generation failed.');
       }
       throw err;
     }

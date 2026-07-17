@@ -1112,7 +1112,7 @@ function connectToJobStream(jobId, file) {
           finishOk(data.result);
           return true;
         }
-        if (data.state === 'failed' && (data.attemptsMade || 0) >= (data.attempts || 4)) {
+        if (data.state === 'failed' && (data.attemptsMade || 0) >= (data.attempts || 3)) {
           finishErr(data.message || 'Generation failed.');
           return true;
         }
