@@ -2,15 +2,12 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import crypto from 'crypto';
 import db from '../config/db.js';
-import { parsePlaylistImage } from '../services/geminiService.js';
 import * as spotify from '../clients/spotifyClient.js';
 import { getAuthUserId } from '../utils/session.js';
 import { uploadFile } from '../services/storageService.js';
-import { playlistQueue, connection } from '../config/queue.js';
+import { playlistQueue, playlistQueueEvents } from '../config/queue.js';
 import { processPlaylistJob } from '../workers/playlistWorker.js';
-import { QueueEvents } from 'bullmq';
 import {
   DEFAULT_DAILY_LIMIT,
   FREE_DAILY_LIMIT,
@@ -20,11 +17,11 @@ import {
   startOfUtcDay
 } from '../utils/moments.js';
 import { createThumbnailDataUrl } from '../utils/thumbnail.js';
+import { trackExclusions } from '../utils/moments.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '../..');
+const projectRoot = path.resolve(path.dirname(__filename), '../..');
 
 export { FREE_DAILY_LIMIT, DEFAULT_DAILY_LIMIT, getRemainingToday };
 
@@ -105,29 +102,15 @@ async function checkDailyLimit(req, res, next) {
   }
 }
 
-function guessMimeFromPath(imagePath) {
-  const ext = path.extname(imagePath).toLowerCase();
-  if (ext === '.png') return 'image/png';
-  if (ext === '.webp') return 'image/webp';
-  return 'image/jpeg';
-}
-
-async function loadImageBytes(imagePath) {
-  if (!imagePath) throw new Error('Missing image path.');
-  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-    const response = await fetch(imagePath);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch stored image: ${response.statusText}`);
-    }
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const mimeType = response.headers.get('content-type') || guessMimeFromPath(imagePath);
-    return { buffer, mimeType };
-  }
-
-  const relative = imagePath.startsWith('/') ? imagePath.slice(1) : imagePath;
-  const localPath = path.resolve(projectRoot, relative);
-  const buffer = await fs.promises.readFile(localPath);
-  return { buffer, mimeType: guessMimeFromPath(imagePath) };
+async function loadRecentTrackExclusions(userId, take = 3) {
+  if (!userId) return [];
+  const generations = await db.generation.findMany({
+    where: { user_id: userId },
+    take,
+    orderBy: { created_at: 'desc' },
+    select: { tracks: true }
+  });
+  return trackExclusions(generations.flatMap((generation) => generation.tracks || []));
 }
 
 function generationToProcessResult(row) {
@@ -235,9 +218,9 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
   }
 
   try {
-    // 1. Ingestion: Read file buffer to send to Gemini
+    // Keep only a small thumbnail in-process. The full image is uploaded before
+    // queueing and is never serialized into the Redis job payload.
     const fileBuffer = await fs.promises.readFile(filePath);
-    const fileBufferBase64 = fileBuffer.toString('base64');
     const imageThumb = await createThumbnailDataUrl(fileBuffer, mimeType);
 
     // 2. Upload file to storage provider (S3/R2 or local fallback) immediately (fast path)
@@ -247,27 +230,13 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
 
     // Remote storage (S3/R2) removes the temp file inside uploadFile; keep local uploads on disk for /uploads static + regenerate.
 
-    // 3. Spotify Match Setup
-    console.log("Using client credentials token for Spotify catalog search.");
-    const spotifyToken = await spotify.getClientCredentialsToken();
-
-    // Retrieve past playlist IDs for repeat check (worker will resolve tracks)
-    const pastPlaylistIds = [];
+    // Use locally persisted tracks instead of downloading previous playlists from Spotify.
+    let excludedSongs = [];
     if (userId) {
       try {
-        const pastGenerations = await db.generation.findMany({
-          where: { user_id: userId, NOT: { playlist_id: null } },
-          take: 3,
-          orderBy: { created_at: 'desc' },
-          select: { playlist_id: true }
-        });
-        for (const gen of pastGenerations) {
-          if (gen.playlist_id) {
-            pastPlaylistIds.push(gen.playlist_id);
-          }
-        }
+        excludedSongs = await loadRecentTrackExclusions(userId);
       } catch (dbErr) {
-        console.warn("Failed to retrieve past generation IDs:", dbErr);
+        console.warn('Failed to retrieve previous track exclusions:', dbErr);
       }
     }
 
@@ -280,15 +249,13 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
     }
 
     const jobData = {
-      fileBufferBase64,
-      mimeType,
+      sourceImagePath: webImagePath,
       fileName: req.file.originalname,
       customPrompt: req.body.customPrompt || '',
       userId,
-      spotifyToken,
       webImagePath,
       imageThumb,
-      pastPlaylistIds,
+      excludedSongs,
       trackLimit: trackLimitForTier(userTier)
     };
 
@@ -334,7 +301,6 @@ router.get('/job/:jobId/stream', async (req, res) => {
 
   let isClosed = false;
   let heartbeatTimer = null;
-  let pollTimer = null;
 
   const cleanup = () => {
     if (isClosed) return;
@@ -343,25 +309,14 @@ router.get('/job/:jobId/stream', async (req, res) => {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-    queueEvents.off('progress', onProgress);
-    queueEvents.off('completed', onCompleted);
-    queueEvents.off('failed', onFailed);
-    queueEvents.off('delayed', onDelayed);
-    queueEvents.close().catch(() => {});
+    playlistQueueEvents?.off('progress', onProgress);
+    playlistQueueEvents?.off('completed', onCompleted);
+    playlistQueueEvents?.off('failed', onFailed);
+    playlistQueueEvents?.off('delayed', onDelayed);
     res.end();
   };
 
   req.on('close', cleanup);
-
-  const queueEvents = new QueueEvents('playlist-generation', { connection });
-
-  queueEvents.on('error', (err) => {
-    console.error(`[SSE Stream] QueueEvents Error for job ${jobIdKey}:`, err);
-  });
 
   const matchesJob = (id) => String(id) === jobIdKey;
 
@@ -384,7 +339,7 @@ router.get('/job/:jobId/stream', async (req, res) => {
     try {
       const job = await playlistQueue.getJob(jobIdKey);
       if (job) {
-        const maxAttempts = job.opts?.attempts || 4;
+        const maxAttempts = job.opts?.attempts || 3;
         const attemptsMade = job.attemptsMade || 0;
         if (attemptsMade < maxAttempts) {
           res.write(`event: retrying\ndata: ${JSON.stringify({
@@ -437,36 +392,26 @@ router.get('/job/:jobId/stream', async (req, res) => {
       return;
     }
 
-    queueEvents.on('progress', onProgress);
-    queueEvents.on('completed', onCompleted);
-    queueEvents.on('failed', onFailed);
-    queueEvents.on('delayed', onDelayed);
+    if (!playlistQueueEvents) {
+      throw new Error('Queue events are unavailable in this environment.');
+    }
+    playlistQueueEvents.on('progress', onProgress);
+    playlistQueueEvents.on('completed', onCompleted);
+    playlistQueueEvents.on('failed', onFailed);
+    playlistQueueEvents.on('delayed', onDelayed);
 
-    // Periodic status poll so a missed Redis event still finishes the UI
-    pollTimer = setInterval(async () => {
-      if (isClosed) return;
-      try {
-        const latest = await playlistQueue.getJob(jobIdKey);
-        if (!latest) return;
-        const latestState = await latest.getState();
-        if (latestState === 'completed') {
-          onCompleted({ jobId: jobIdKey, returnvalue: latest.returnvalue });
-        } else if (latestState === 'failed') {
-          const maxAttempts = latest.opts?.attempts || 4;
-          if ((latest.attemptsMade || 0) >= maxAttempts) {
-            res.write(`event: failed\ndata: ${JSON.stringify({ message: latest.failedReason || 'Job failed' })}\n\n`);
-            cleanup();
-          }
-        } else if (latestState === 'active') {
-          res.write(`event: progress\ndata: ${JSON.stringify({
-            stage: 'working',
-            message: 'Still curating your playlist…'
-          })}\n\n`);
-        }
-      } catch (pollErr) {
-        console.warn(`[SSE Stream] Poll error for ${jobIdKey}:`, pollErr.message);
+    // Cover the small gap between the initial state read and listener setup
+    // without returning to a per-client polling loop.
+    const refreshedJob = await playlistQueue.getJob(jobIdKey);
+    if (refreshedJob) {
+      const refreshedState = await refreshedJob.getState();
+      if (refreshedState === 'completed') {
+        onCompleted({ jobId: jobIdKey, returnvalue: refreshedJob.returnvalue });
+      } else if (refreshedState === 'failed') {
+        onFailed({ jobId: jobIdKey, failedReason: refreshedJob.failedReason || 'Job failed' });
       }
-    }, 10000);
+    }
+
   } catch (err) {
     console.error(`[SSE Stream] Error fetching job state for ${jobIdKey}:`, err);
     res.write(`event: failed\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
@@ -506,7 +451,7 @@ router.get('/job/:jobId', async (req, res) => {
       state,
       message: job.failedReason || null,
       attemptsMade: job.attemptsMade || 0,
-      attempts: job.opts?.attempts || 4
+      attempts: job.opts?.attempts || 3
     });
   } catch (err) {
     console.error(`[Job Status] Error for ${jobIdKey}:`, err);
@@ -795,27 +740,16 @@ router.post('/regenerate', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Moment not found.' });
     }
 
-    const { buffer, mimeType } = await loadImageBytes(generation.image_path);
-    const imageThumb = await createThumbnailDataUrl(buffer, mimeType)
-      || generation.image_thumb
-      || null;
-    const spotifyToken = await spotify.getClientCredentialsToken();
-
-    const pastPlaylistIds = [];
-    if (generation.playlist_id) {
-      pastPlaylistIds.push(generation.playlist_id);
-    }
+    const excludedSongs = await loadRecentTrackExclusions(userId);
 
     const jobData = {
-      fileBufferBase64: buffer.toString('base64'),
-      mimeType,
+      sourceImagePath: generation.image_path,
       fileName: path.basename(generation.image_path),
       customPrompt: '',
       userId,
-      spotifyToken,
       webImagePath: generation.image_path,
-      imageThumb,
-      pastPlaylistIds,
+      imageThumb: generation.image_thumb || null,
+      excludedSongs,
       trackLimit: trackLimitForTier('premium')
     };
 
