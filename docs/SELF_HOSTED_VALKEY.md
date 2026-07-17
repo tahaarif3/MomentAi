@@ -25,7 +25,7 @@ cp .env.example .env
 ```
 
 Edit `.env`: set `VALKEY_PRIVATE_IP` to the Droplet's VPC private IPv4, then
-generate a password with `openssl rand -base64 48`.
+generate a password with `openssl rand -hex 32`.
 
 ```bash
 sudo docker compose up -d
@@ -43,8 +43,8 @@ In App Platform's environment variables, set `REDIS_URL` to:
 redis://:URL_ENCODED_VALKEY_PASSWORD@VALKEY_PRIVATE_IP:6379
 ```
 
-The password must be URL-encoded. Do not place the raw password in the URL if
-it contains characters such as `@`, `:`, `/`, or `#`.
+The documented hex password can be used directly in this URL. If you choose a
+different password format, URL-encode characters such as `@`, `:`, `/`, or `#`.
 
 Deploy the app, then generate one playlist and verify the app logs include
 `[Redis] Connected successfully` and `[Worker] BullMQ playlist generation worker started`.
