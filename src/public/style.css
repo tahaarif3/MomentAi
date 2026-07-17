@@ -2310,12 +2310,13 @@ body[data-screen="loading"] .screen[data-screen="loading"] {
 }
 .loading-frame-beam {
   stroke: #f6d28a;
-  stroke-width: 2.25;
+  stroke-width: 2.5;
   stroke-linecap: round;
-  stroke-dasharray: 14 86;
+  /* Short bead so it reads as a moving light, not a partial box edge */
+  stroke-dasharray: 7 93;
   stroke-dashoffset: 0;
-  filter: drop-shadow(0 0 5px rgba(233, 169, 79, 0.8));
-  animation: loading-beam-travel 2.6s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(233, 169, 79, 0.9));
+  animation: loading-beam-travel 2.2s linear infinite;
 }
 @keyframes loading-beam-travel {
   from { stroke-dashoffset: 0; }
