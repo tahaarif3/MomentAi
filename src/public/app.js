@@ -1260,7 +1260,11 @@ function showShareScreen() {
 async function handleDownloadShare() {
   const card = document.getElementById('shareCardExport');
   if (!card) return;
-  await downloadShareCardPng(card);
+  try {
+    await downloadShareCardPng(card);
+  } catch (err) {
+    showErrorScreen('Download failed', err.message || 'Could not export share card.', 'generic');
+  }
 }
 
 async function handleCopyShareLink() {
@@ -1276,12 +1280,20 @@ async function handleCopyShareLink() {
 async function handleInstagramStory() {
   const card = document.getElementById('shareCardExport');
   if (!card) return;
-  const { rasterizeShareCard } = await import('./share-card.js');
-  const dataUrl = await rasterizeShareCard(card, { width: 1080, height: 1920, pixelRatio: 1 });
-  const link = document.createElement('a');
-  link.download = 'momentai-story.png';
-  link.href = dataUrl;
-  link.click();
+  try {
+    const { rasterizeShareCard } = await import('./share-card.js');
+    const dataUrl = await rasterizeShareCard(card, {
+      width: 1080,
+      height: 1920,
+      story: true
+    });
+    const link = document.createElement('a');
+    link.download = 'momentai-story.png';
+    link.href = dataUrl;
+    link.click();
+  } catch (err) {
+    showErrorScreen('Export failed', err.message || 'Could not export story image.', 'generic');
+  }
 }
 
 // Render Gemini visual metadata outputs
