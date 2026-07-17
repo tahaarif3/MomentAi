@@ -2043,7 +2043,7 @@ textarea.prompt-input {
   .spinner,
   .loading-ring,
   .loading-blob,
-  .loading-frame-spin,
+  .loading-frame,
   .live-dot {
     animation: none !important;
   }
@@ -2290,16 +2290,38 @@ body[data-screen="loading"] .screen[data-screen="loading"] {
 }
 
 /* Traveling amber light along a soft rounded frame */
+@property --loading-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .loading-frame {
+  --loading-angle: 0deg;
   position: absolute;
-  inset: clamp(12px, 3vw, 28px);
+  inset: clamp(14px, 3.5vw, 32px);
   border-radius: clamp(22px, 4vw, 36px);
-  padding: 1.5px;
+  padding: 2px;
   pointer-events: none;
   z-index: 0;
-  overflow: hidden;
-  opacity: 0.9;
-  /* Punch out the interior — only the 1.5px rim shows the spinning gradient */
+  opacity: 0.95;
+  background:
+    conic-gradient(
+      from var(--loading-angle),
+      rgba(233, 169, 79, 0.14) 0%,
+      rgba(233, 169, 79, 0.14) 100%
+    ),
+    conic-gradient(
+      from var(--loading-angle),
+      transparent 0%,
+      transparent 58%,
+      rgba(233, 169, 79, 0.15) 66%,
+      rgba(255, 214, 140, 1) 72%,
+      rgba(233, 169, 79, 0.35) 78%,
+      transparent 86%
+    );
+  animation: loading-frame-spin 3.2s linear infinite;
+  /* Keep only the rim — interior stays transparent so aura shows through */
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
@@ -2309,30 +2331,8 @@ body[data-screen="loading"] .screen[data-screen="loading"] {
     linear-gradient(#000 0 0);
   mask-composite: exclude;
 }
-.loading-frame::before {
-  /* Soft always-on rim so the frame never vanishes between the traveling highlight */
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgba(233, 169, 79, 0.16);
-}
-.loading-frame-spin {
-  position: absolute;
-  inset: -45%;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0%,
-    transparent 58%,
-    rgba(233, 169, 79, 0.08) 64%,
-    rgba(242, 189, 109, 1) 72%,
-    rgba(233, 169, 79, 0.25) 78%,
-    transparent 86%
-  );
-  animation: loading-frame-spin 3.6s linear infinite;
-}
 @keyframes loading-frame-spin {
-  to { transform: rotate(360deg); }
+  to { --loading-angle: 360deg; }
 }
 
 .loading-copy,
