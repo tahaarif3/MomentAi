@@ -2043,6 +2043,7 @@ textarea.prompt-input {
   .spinner,
   .loading-ring,
   .loading-blob,
+  .loading-frame-beam,
   .live-dot {
     animation: none !important;
   }
@@ -2219,17 +2220,139 @@ textarea.prompt-input {
 .capture-footnote { text-align: center; color: var(--text-muted); margin-top: 8px; }
 .upload-fallback-link { display: block; text-align: center; margin-top: 8px; width: 100%; }
 
-.loading-stage { position: relative; min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; overflow: hidden; }
-.loading-blob { position: absolute; border-radius: 50%; filter: blur(36px); pointer-events: none; }
-.loading-blob--blue { width: 50vmin; height: 50vmin; background: rgba(96,124,168,0.35); left: -10%; top: 20%; }
-.loading-blob--amber { width: 45vmin; height: 45vmin; background: rgba(233,169,79,0.3); right: -5%; top: 10%; }
-.loading-blob--brown { width: 40vmin; height: 40vmin; background: rgba(160,110,70,0.28); bottom: 5%; left: 25%; }
-.loading-title { font-size: clamp(28px, 5vw, 38px); font-weight: 700; z-index: 1; }
-.loading-sub { color: #746a5a; font-size: clamp(28px, 5vw, 38px); font-weight: 700; margin-bottom: 24px; z-index: 1; }
-.loading-ring { width: 190px; height: 190px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 6%, var(--accent) 68%, transparent 70%); mask: radial-gradient(farthest-side, transparent calc(100% - 14%), #000 calc(100% - 13%)); animation: spin 1.5s linear infinite; z-index: 1; margin: 16px 0; }
+/* Full-bleed loading: no padded “card” box that clips the aura hard */
+body[data-screen="loading"] .app-container {
+  width: 100%;
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+body[data-screen="loading"] .app-header {
+  padding-left: 16px;
+  padding-right: 16px;
+  margin-left: 16px;
+  margin-right: 16px;
+}
+body[data-screen="loading"] .screen[data-screen="loading"] {
+  padding: 0;
+}
+
+.loading-stage {
+  position: relative;
+  min-height: calc(100dvh - 72px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+  isolation: isolate;
+  padding: 28px 16px 48px;
+  box-sizing: border-box;
+}
+
+/* Soft-mask the glow layer so clipped blobs fade into --bg (no hard rectangle) */
+.loading-aura {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  -webkit-mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 28%, transparent 78%);
+  mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 28%, transparent 78%);
+}
+
+.loading-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(48px);
+  pointer-events: none;
+  opacity: 0.95;
+}
+.loading-blob--blue {
+  width: 58vmin;
+  height: 58vmin;
+  background: rgba(96, 124, 168, 0.42);
+  left: -8%;
+  top: 18%;
+}
+.loading-blob--amber {
+  width: 52vmin;
+  height: 52vmin;
+  background: rgba(233, 169, 79, 0.36);
+  right: -6%;
+  top: 8%;
+}
+.loading-blob--brown {
+  width: 48vmin;
+  height: 48vmin;
+  background: rgba(160, 110, 70, 0.32);
+  bottom: 4%;
+  left: 22%;
+}
+
+/* Traveling amber highlight along a soft rounded frame (SVG stroke) */
+.loading-frame {
+  position: absolute;
+  inset: clamp(8px, 2vw, 20px);
+  pointer-events: none;
+  z-index: 0;
+}
+.loading-frame-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.loading-frame-track {
+  stroke: rgba(233, 169, 79, 0.1);
+  stroke-width: 1.25;
+}
+.loading-frame-beam {
+  stroke: #f6d28a;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  /* Short bead so it reads as a moving light, not a partial box edge */
+  stroke-dasharray: 7 93;
+  stroke-dashoffset: 0;
+  filter: drop-shadow(0 0 6px rgba(233, 169, 79, 0.9));
+  animation: loading-beam-travel 2.2s linear infinite;
+}
+@keyframes loading-beam-travel {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -100; }
+}
+
+.loading-copy,
+.loading-ring,
+.loading-status {
+  position: relative;
+  z-index: 1;
+}
+
+.loading-title {
+  font-size: clamp(24px, 4.2vh, 38px);
+  font-weight: 700;
+}
+.loading-sub {
+  color: #746a5a;
+  font-size: clamp(24px, 4.2vh, 38px);
+  font-weight: 700;
+  margin-bottom: clamp(12px, 2vh, 24px);
+}
+.loading-ring {
+  width: min(170px, 34vh, 46vw);
+  height: min(170px, 34vh, 46vw);
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 6%, var(--accent) 68%, transparent 70%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 14%), #000 calc(100% - 13%));
+  animation: spin 1.5s linear infinite;
+  margin: clamp(8px, 1.5vh, 16px) 0;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-pill { background: rgba(236,231,223,0.08); border-radius: 999px; padding: 10px 18px; font-size: 16px; z-index: 1; }
-.loading-pct { color: var(--text-muted); margin-top: 8px; z-index: 1; }
+.loading-pill { background: rgba(236,231,223,0.08); border-radius: 999px; padding: 10px 18px; font-size: 16px; }
+.loading-pct { color: var(--text-muted); margin-top: 8px; }
 #analysisLoader { position: relative; background: transparent; }
 
 .playlist-header-row { display: flex; gap: 16px; margin: 16px 0; }
