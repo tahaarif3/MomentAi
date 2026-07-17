@@ -41,6 +41,8 @@ test.describe('Your moments history API', () => {
     expect(history.success).toBe(true);
     expect(history.history.length).toBeGreaterThan(0);
     expect(history.history[0].track_count).toBeGreaterThan(0);
+    expect(history.history[0].image_thumb || history.history[0].display_image).toBeTruthy();
+    expect(String(history.history[0].image_thumb || history.history[0].display_image)).toMatch(/^data:image\//);
 
     const genId = history.history[0].id;
     const detailRes = await request.get(`${API}/api/playlist/generation/${genId}`, {

@@ -19,6 +19,7 @@ import {
   trackLimitForTier,
   startOfUtcDay
 } from '../utils/moments.js';
+import { createThumbnailDataUrl } from '../utils/thumbnail.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -132,10 +133,13 @@ async function loadImageBytes(imagePath) {
 function generationToProcessResult(row) {
   const tracks = Array.isArray(row.tracks) ? row.tracks : [];
   const suggestedTracks = Array.isArray(row.suggested_tracks) ? row.suggested_tracks : [];
+  // Prefer durable thumb for UI display when full image_path may 404
+  const displayImage = row.image_thumb || row.image_path;
   return {
     success: true,
     generationId: row.id,
-    imagePath: row.image_path,
+    imagePath: displayImage,
+    imageThumb: row.image_thumb || null,
     metadata: {
       dominantColorPalette: JSON.parse(row.dominant_colors),
       environmentalContext: row.environmental_context,
@@ -234,6 +238,7 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
     // 1. Ingestion: Read file buffer to send to Gemini
     const fileBuffer = await fs.promises.readFile(filePath);
     const fileBufferBase64 = fileBuffer.toString('base64');
+    const imageThumb = await createThumbnailDataUrl(fileBuffer, mimeType);
 
     // 2. Upload file to storage provider (S3/R2 or local fallback) immediately (fast path)
     console.log("Uploading file to storage provider...");
@@ -282,6 +287,7 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
       userId,
       spotifyToken,
       webImagePath,
+      imageThumb,
       pastPlaylistIds,
       trackLimit: trackLimitForTier(userTier)
     };
@@ -612,6 +618,7 @@ router.get('/history', async (req, res) => {
       select: {
         id: true,
         image_path: true,
+        image_thumb: true,
         playlist_name: true,
         playlist_url: true,
         emotional_vibe: true,
@@ -621,9 +628,32 @@ router.get('/history', async (req, res) => {
       }
     });
 
+    // Best-effort backfill: if thumb missing but local /uploads file still exists
+    for (const row of historyRows) {
+      if (row.image_thumb) continue;
+      if (!row.image_path?.startsWith('/uploads/')) continue;
+      try {
+        const localPath = path.resolve(projectRoot, row.image_path.slice(1));
+        if (!fs.existsSync(localPath)) continue;
+        const buf = await fs.promises.readFile(localPath);
+        const thumb = await createThumbnailDataUrl(buf);
+        if (!thumb) continue;
+        await db.generation.update({
+          where: { id: row.id },
+          data: { image_thumb: thumb }
+        });
+        row.image_thumb = thumb;
+      } catch (err) {
+        console.warn(`[history] thumb backfill failed for ${row.id}:`, err.message);
+      }
+    }
+
     const history = historyRows.map((row) => ({
       id: row.id,
       image_path: row.image_path,
+      // Prefer durable thumb for cards (full path may 404 after redeploy)
+      image_thumb: row.image_thumb || null,
+      display_image: row.image_thumb || row.image_path,
       playlist_name: row.playlist_name,
       playlist_url: row.playlist_url,
       emotional_vibe: row.emotional_vibe,
@@ -766,6 +796,9 @@ router.post('/regenerate', async (req, res) => {
     }
 
     const { buffer, mimeType } = await loadImageBytes(generation.image_path);
+    const imageThumb = await createThumbnailDataUrl(buffer, mimeType)
+      || generation.image_thumb
+      || null;
     const spotifyToken = await spotify.getClientCredentialsToken();
 
     const pastPlaylistIds = [];
@@ -781,6 +814,7 @@ router.post('/regenerate', async (req, res) => {
       userId,
       spotifyToken,
       webImagePath: generation.image_path,
+      imageThumb,
       pastPlaylistIds,
       trackLimit: trackLimitForTier('premium')
     };
