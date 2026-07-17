@@ -47,6 +47,7 @@ model Generation {
   playlist_url          String?
   tracks                Json?
   suggested_tracks      Json?
+  image_thumb           String?  // data:image/jpeg;base64,... for durable history cards
   created_at            DateTime @default(now())
   user                  User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
 

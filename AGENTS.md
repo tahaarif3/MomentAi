@@ -35,6 +35,7 @@ See `package.json`: `npm run dev`, `npm test`, `npm run db:migrate`, `npx prisma
 - To give a user more free uploads:
   1. SQL: `UPDATE users SET daily_upload_limit = 20 WHERE email = 'friend@example.com';`
   2. Admin API (set `ADMIN_API_SECRET`): `PATCH /api/admin/users/by-email/daily-limit` with header `x-admin-secret` and body `{ "email": "...", "dailyUploadLimit": 20 }`
+- **Moment thumbnails:** `generations.image_thumb` stores a small JPEG data-URL so Your Moments cards survive ephemeral `/uploads` and private object URLs. Full `image_path` remains for regenerate when reachable. History lazily backfills thumbs from local `/uploads` files when present.
 - If migrate fails on `0_init` for an existing DB: `npx prisma migrate resolve --applied 0_init && npm run db:migrate`
 
 ### Test mode

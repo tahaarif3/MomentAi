@@ -104,11 +104,11 @@ export function renderMomentsGrid(gridEl, history, { onOpen, onDelete, onSignInN
     const card = document.createElement('div');
     card.className = 'moment-card';
     card.dataset.generationId = row.id;
-    const imgSrc = row.image_path?.startsWith('http') ? row.image_path : row.image_path;
+    const imgSrc = row.display_image || row.image_thumb || row.image_path || '';
     const trackLabel = row.track_count === 1 ? '1 track' : `${row.track_count || 0} tracks`;
     card.innerHTML = `
       <button type="button" class="moment-card-open" aria-label="Open moment">
-        <div class="moment-card-photo" style="background-image:url('${escapeAttr(imgSrc)}')"></div>
+        <div class="moment-card-photo${imgSrc ? '' : ' moment-card-photo--empty'}" style="${imgSrc ? `background-image:url('${escapeAttr(imgSrc)}')` : ''}"></div>
         <p class="moment-card-title">${escapeHtml(momentTitle(row))}</p>
         <p class="moment-card-meta mono">${formatMomentDate(row.created_at)} · ${trackLabel}</p>
       </button>

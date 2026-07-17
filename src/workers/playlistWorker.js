@@ -52,6 +52,7 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
     userId,
     spotifyToken,
     webImagePath,
+    imageThumb = null,
     excludedSongs = [],
     pastPlaylistIds = [],
     trackLimit = FREE_TRACK_LIMIT
@@ -194,6 +195,7 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
         id: generationId,
         user_id: userId,
         image_path: webImagePath,
+        image_thumb: imageThumb || null,
         dominant_colors: JSON.stringify(metadata.dominantColorPalette),
         environmental_context: metadata.environmentalContext,
         emotional_vibe: metadata.emotionalVibe,
@@ -210,7 +212,8 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
   return {
     success: true,
     generationId: userId ? generationId : null,
-    imagePath: webImagePath,
+    imagePath: imageThumb || webImagePath,
+    imageThumb: imageThumb || null,
     metadata,
     isAuthenticated: !!userId,
     tracks: cappedTracks,
