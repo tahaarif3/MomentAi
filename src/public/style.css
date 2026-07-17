@@ -2294,7 +2294,7 @@ body[data-screen="loading"] .screen[data-screen="loading"] {
 /* Traveling amber highlight along a soft rounded frame (SVG stroke) */
 .loading-frame {
   position: absolute;
-  inset: clamp(10px, 2.5vw, 24px);
+  inset: clamp(8px, 2vw, 20px);
   pointer-events: none;
   z-index: 0;
 }
@@ -2304,28 +2304,21 @@ body[data-screen="loading"] .screen[data-screen="loading"] {
   height: 100%;
   overflow: visible;
 }
-.loading-frame-track,
-.loading-frame-beam {
-  fill: none;
-  width: calc(100% - 4px);
-  height: calc(100% - 4px);
-  rx: clamp(18px, 3.5vw, 32px);
-  ry: clamp(18px, 3.5vw, 32px);
-  vector-effect: non-scaling-stroke;
-}
 .loading-frame-track {
-  stroke: rgba(233, 169, 79, 0.14);
-  stroke-width: 1px;
+  stroke: rgba(233, 169, 79, 0.1);
+  stroke-width: 1.25;
 }
 .loading-frame-beam {
   stroke: #f6d28a;
-  stroke-width: 2px;
+  stroke-width: 2.25;
   stroke-linecap: round;
-  stroke-dasharray: 16 84;
-  filter: drop-shadow(0 0 6px rgba(233, 169, 79, 0.75));
-  animation: loading-beam-travel 2.8s linear infinite;
+  stroke-dasharray: 14 86;
+  stroke-dashoffset: 0;
+  filter: drop-shadow(0 0 5px rgba(233, 169, 79, 0.8));
+  animation: loading-beam-travel 2.6s linear infinite;
 }
 @keyframes loading-beam-travel {
+  from { stroke-dashoffset: 0; }
   to { stroke-dashoffset: -100; }
 }
 
@@ -2336,17 +2329,25 @@ body[data-screen="loading"] .screen[data-screen="loading"] {
   z-index: 1;
 }
 
-.loading-title { font-size: clamp(28px, 5vw, 38px); font-weight: 700; }
-.loading-sub { color: #746a5a; font-size: clamp(28px, 5vw, 38px); font-weight: 700; margin-bottom: 24px; }
+.loading-title {
+  font-size: clamp(24px, 4.2vh, 38px);
+  font-weight: 700;
+}
+.loading-sub {
+  color: #746a5a;
+  font-size: clamp(24px, 4.2vh, 38px);
+  font-weight: 700;
+  margin-bottom: clamp(12px, 2vh, 24px);
+}
 .loading-ring {
-  width: min(190px, 46vw);
-  height: min(190px, 46vw);
+  width: min(170px, 34vh, 46vw);
+  height: min(170px, 34vh, 46vw);
   flex-shrink: 0;
   border-radius: 50%;
   background: conic-gradient(from 0deg, transparent 6%, var(--accent) 68%, transparent 70%);
   mask: radial-gradient(farthest-side, transparent calc(100% - 14%), #000 calc(100% - 13%));
   animation: spin 1.5s linear infinite;
-  margin: 16px 0;
+  margin: clamp(8px, 1.5vh, 16px) 0;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-pill { background: rgba(236,231,223,0.08); border-radius: 999px; padding: 10px 18px; font-size: 16px; }
