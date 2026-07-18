@@ -1026,7 +1026,7 @@ async function uploadAndProcessImage(file) {
 
     if (data.jobId) {
       console.log(`Job queued successfully with ID: ${data.jobId}`);
-      await connectToJobStream(data.jobId, file);
+      await connectToJobStream(data.jobId, file, data.progressToken);
     } else {
       console.log("Direct processing result returned.");
       handleProcessingSuccess(data);
@@ -1079,17 +1079,30 @@ function handleProcessingSuccess(result) {
   showScreen('playlist');
 }
 
-function connectToJobStream(jobId, file) {
+function connectToJobStream(jobId, file, progressToken = null) {
   return new Promise((resolve, reject) => {
     const loaderProgressText = document.getElementById('loaderProgressText');
-    const streamUrl = `/api/playlist/job/${jobId}/stream`;
+    const tokenQuery = progressToken
+      ? `?progressToken=${encodeURIComponent(progressToken)}`
+      : '';
+    // Absolute API_BASE required for Capacitor / cross-origin; same-origin web uses ''.
+    const streamUrl = `${API_BASE}/api/playlist/job/${jobId}/stream${tokenQuery}`;
     const eventSource = new EventSource(streamUrl);
     let settled = false;
+
+    try {
+      if (progressToken) {
+        sessionStorage.setItem('momentai.activeJob', JSON.stringify({ jobId, progressToken }));
+      }
+    } catch {
+      /* ignore */
+    }
 
     const finishOk = (result) => {
       if (settled) return;
       settled = true;
       eventSource.close();
+      try { sessionStorage.removeItem('momentai.activeJob'); } catch { /* ignore */ }
       setLoadingProgress(100, 'Curating tracks…');
       handleProcessingSuccess(result);
       resolve();
@@ -1099,13 +1112,17 @@ function connectToJobStream(jobId, file) {
       if (settled) return;
       settled = true;
       eventSource.close();
+      try { sessionStorage.removeItem('momentai.activeJob'); } catch { /* ignore */ }
       showErrorScreen(title, userMsg, type, () => uploadAndProcessImage(file));
       reject(new Error(userMsg));
     };
 
     const recoverFromStatus = async () => {
       try {
-        const res = await apiFetch(`/api/playlist/job/${jobId}`);
+        const statusPath = progressToken
+          ? `/api/playlist/job/${jobId}?progressToken=${encodeURIComponent(progressToken)}`
+          : `/api/playlist/job/${jobId}`;
+        const res = await apiFetch(statusPath);
         if (!res.ok) return false;
         const data = await res.json();
         if (data.state === 'completed' && data.result) {
@@ -1227,7 +1244,7 @@ async function handleRegenerate() {
       throw new Error(data.message || 'Regenerate failed.');
     }
     if (data.jobId) {
-      await connectToJobStream(data.jobId, stagedFile);
+      await connectToJobStream(data.jobId, stagedFile, data.progressToken);
     } else {
       handleProcessingSuccess(data);
     }

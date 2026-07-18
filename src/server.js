@@ -12,6 +12,8 @@ import playlistRouter from './routes/playlist.js';
 import paymentRouter, { handleStripeWebhook } from './routes/payment.js';
 import healthRouter from './routes/health.js';
 import adminRouter from './routes/admin.js';
+import mobileRouter from './routes/mobile.js';
+import billingRouter from './routes/billing.js';
 
 // Setup __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -61,6 +63,7 @@ app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost',
     'capacitor://localhost',
+    'ionic://localhost',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'https://momentai.dev',
@@ -74,7 +77,10 @@ app.use((req, res, next) => {
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, Cookie, X-Progress-Token, X-Test-User-Id'
+  );
   
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
@@ -120,8 +126,10 @@ app.use(express.static(path.resolve(__dirname, 'public')));
 // Connect API Routes
 app.use('/health', healthRouter); // Mount health check for Load Balancers
 app.use('/api/auth', authRouter);
-app.use('/api/playlist', apiLimiter, playlistRouter); // Apply rate limiter to process/save routes
-app.use('/api/payment', apiLimiter, paymentRouter);   // Apply rate limiter to payments
+app.use('/api/mobile', mobileRouter); // Public native compatibility / force-upgrade
+app.use('/api/billing', apiLimiter, billingRouter); // Store entitlement webhooks (RevenueCat)
+app.use('/api/playlist', apiLimiter, playlistRouter); // IP limiter fallback; per-user limits inside router
+app.use('/api/payment', apiLimiter, paymentRouter);   // Apply rate limiter to payments (web Stripe)
 app.use('/api/admin', apiLimiter, adminRouter);
 
 // Fallback: Send public/index.html for any frontend SPA navigation

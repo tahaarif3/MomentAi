@@ -2,8 +2,16 @@ import express from 'express';
 import db from '../config/db.js';
 import { getAuthUserId, getAuthUser } from '../utils/session.js';
 import { getRemainingToday, effectiveDailyLimit, DEFAULT_DAILY_LIMIT } from '../utils/moments.js';
+import { deleteStoredObject } from '../services/storageService.js';
+import { supabaseAdmin } from '../config/supabase.js';
+import Stripe from 'stripe';
 
 const router = express.Router();
+
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) return null;
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
+}
 
 /**
  * Route: POST /api/auth/callback
@@ -131,6 +139,74 @@ router.get('/config', (req, res) => {
  */
 router.post('/logout', (req, res) => {
   res.json({ success: true, message: 'Logged out successfully' });
+});
+
+/**
+ * Route: DELETE /api/auth/account
+ * Permanently delete the authenticated user's account:
+ * - Best-effort cancel Stripe subscription (web billing)
+ * - Delete generation image objects (Spaces/local)
+ * - Delete Postgres user (cascades generations)
+ * - Delete Supabase Auth user
+ *
+ * Store entitlements (RevenueCat) should also revoke via their dashboard/webhooks;
+ * we set tier cleanup by removing the user row.
+ */
+router.delete('/account', async (req, res) => {
+  const userId = await getAuthUserId(req);
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        stripe_customer_id: true,
+        stripe_subscription_id: true,
+        generations: { select: { image_path: true } }
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    // Best-effort Stripe cleanup (web subscriptions)
+    const stripe = getStripe();
+    if (stripe && user.stripe_subscription_id) {
+      try {
+        await stripe.subscriptions.cancel(user.stripe_subscription_id);
+      } catch (err) {
+        console.warn(`[account delete] Stripe cancel failed for ${userId}:`, err.message);
+      }
+    }
+
+    for (const gen of user.generations || []) {
+      await deleteStoredObject(gen.image_path);
+    }
+
+    await db.user.delete({ where: { id: userId } });
+
+    if (supabaseAdmin && process.env.NODE_ENV !== 'test') {
+      const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+      if (error) {
+        console.error(`[account delete] Supabase Auth delete failed for ${userId}:`, error.message);
+        return res.status(500).json({
+          success: false,
+          message: 'Account data removed, but auth cleanup failed. Contact support.'
+        });
+      }
+    }
+
+    console.log(`[account delete] Removed user ${userId} (${user.email || 'no-email'})`);
+    return res.json({ success: true, message: 'Account deleted.' });
+  } catch (err) {
+    console.error('Account delete error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 export default router;
