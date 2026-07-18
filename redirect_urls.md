@@ -42,11 +42,21 @@ Configure these under **Authentication** ➔ **URL Configuration** in your Supab
   ```text
   https://momentai.dev
   https://momentai.dev/*
+  https://momentai.dev/auth/callback
+  momentai://auth/callback
   ```
+
+### Native (`momentai-mobile` repo):
+* Prefer Universal / App Links: `https://momentai.dev/auth/callback`
+* Fallback custom scheme: `momentai://auth/callback`
+* Host files (served by this web app):
+  - `/.well-known/apple-app-site-association`
+  - `/.well-known/assetlinks.json` (replace Play signing cert fingerprint before release)
 
 ---
 
 ## 💳 3. Stripe Developer Dashboard (Webhooks)
+
 To handle successful subscription checkouts and token pack purchases, configure this webhook in your Stripe settings.
 
 * **Settings Page**: [Stripe Webhooks Dashboard](https://dashboard.stripe.com/test/webhooks)
@@ -65,3 +75,15 @@ To handle successful subscription checkouts and token pack purchases, configure 
 * **Required Events**:
   - `checkout.session.completed`
   - `invoice.payment_succeeded`
+
+Stripe Checkout remains **web-only**. Native Premium uses StoreKit / Play Billing via RevenueCat.
+
+---
+
+## 📱 4. RevenueCat (native store entitlements)
+* **Webhook URL**:
+  ```text
+  https://momentai.dev/api/billing/revenuecat
+  ```
+* **Authorization**: Bearer token matching `REVENUECAT_WEBHOOK_SECRET`
+* Maps store entitlements → `users.tier` (`premium` / `free`)

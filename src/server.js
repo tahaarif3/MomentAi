@@ -120,8 +120,19 @@ if (!fs.existsSync(uploadDir)) {
 // Serve uploaded playlist covers statically
 app.use('/uploads', express.static(uploadDir));
 
+// Universal Links / App Links association files (mobile auth)
+const publicDir = path.resolve(__dirname, 'public');
+app.get('/.well-known/apple-app-site-association', (req, res) => {
+  res.type('application/json');
+  res.sendFile(path.join(publicDir, '.well-known', 'apple-app-site-association'));
+});
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.type('application/json');
+  res.sendFile(path.join(publicDir, '.well-known', 'assetlinks.json'));
+});
+
 // Serve Frontend client statically
-app.use(express.static(path.resolve(__dirname, 'public')));
+app.use(express.static(publicDir));
 
 // Connect API Routes
 app.use('/health', healthRouter); // Mount health check for Load Balancers
