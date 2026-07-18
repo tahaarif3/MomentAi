@@ -115,9 +115,3 @@ npx playwright test
 *   **Secrets Isolation**: Local keys and database sessions are omitted from repository history via `.gitignore`.
 *   **Token Rotation**: Reminders to regularly rotate Client Secrets and API Keys in your cloud providers.
 *   **SQL Injection Prevention**: Parameterized queries enforced via Prisma Client.
-## Production queue options
-
-For App Platform deployments, use either DigitalOcean Managed Valkey or the
-[self-hosted Valkey Droplet runbook](docs/SELF_HOSTED_VALKEY.md). Both use the
-same `REDIS_URL` application setting, so moving to Managed Valkey later does
-not require an application code migration.
