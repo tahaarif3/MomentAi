@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TEAMID.dev.momentai.app",
+        "paths": ["/auth/*", "/auth/callback"]
+      }
+    ]
+  }
+}

@@ -5,7 +5,7 @@ import fs from 'fs';
 import db from '../config/db.js';
 import * as spotify from '../clients/spotifyClient.js';
 import { getAuthUserId } from '../utils/session.js';
-import { uploadFile } from '../services/storageService.js';
+import { uploadFile, deleteStoredObject } from '../services/storageService.js';
 import { playlistQueue, playlistQueueEvents } from '../config/queue.js';
 import { processPlaylistJob } from '../workers/playlistWorker.js';
 import {
@@ -18,6 +18,13 @@ import {
 } from '../utils/moments.js';
 import { createThumbnailDataUrl } from '../utils/thumbnail.js';
 import { trackExclusions } from '../utils/moments.js';
+import {
+  issueProgressToken,
+  verifyProgressToken,
+  extractProgressToken
+} from '../utils/progressToken.js';
+import { createUserRateLimiter } from '../utils/userRateLimit.js';
+import { isAllowedImageMime, normalizeUploadImage } from '../utils/imageConvert.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,6 +33,12 @@ const projectRoot = path.resolve(path.dirname(__filename), '../..');
 export { FREE_DAILY_LIMIT, DEFAULT_DAILY_LIMIT, getRemainingToday };
 
 const router = express.Router();
+
+const userApiLimiter = createUserRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  getUserId: (req) => getAuthUserId(req)
+});
 
 // Configure storage for Multer
 const storage = multer.diskStorage({
@@ -44,21 +57,42 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter to allow only image files
+// JPEG/PNG/WebP + HEIC/HEIF (converted server-side before Gemini/storage)
 const fileFilter = (req, file, cb) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
-  if (allowedMimeTypes.includes(file.mimetype)) {
+  if (isAllowedImageMime(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, and WebP are allowed.'), false);
+    cb(new Error('Invalid file type. Only JPEG, PNG, WebP, and HEIC/HEIF are allowed.'), false);
   }
 };
 
 const upload = multer({ 
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit — clients should target 2–4MB JPEG
 });
+
+/**
+ * Authorize job stream/status: owner JWT or valid progressToken for this jobId.
+ */
+async function assertJobAccess(req, job) {
+  const jobIdKey = String(job.id);
+  const ownerId = job.data?.userId || null;
+  const userId = await getAuthUserId(req);
+  const token = extractProgressToken(req);
+  const tokenPayload = token ? verifyProgressToken(token, jobIdKey) : null;
+
+  if (userId && ownerId && userId === ownerId) {
+    return { ok: true };
+  }
+  if (tokenPayload) {
+    if (ownerId && tokenPayload.userId && tokenPayload.userId !== ownerId) {
+      return { ok: false, status: 403, message: 'Forbidden' };
+    }
+    return { ok: true };
+  }
+  return { ok: false, status: 403, message: 'Forbidden — missing or invalid progress credentials.' };
+}
 
 /**
  * Middleware: enforce per-user daily_upload_limit (UTC). Anonymous users pass through.
@@ -147,9 +181,11 @@ async function enqueueOrRunJob(jobData, res) {
   }
 
   const job = await playlistQueue.add('playlist-generation', jobData);
+  const progressToken = issueProgressToken(job.id, jobData.userId || null);
   return res.status(202).json({
     success: true,
     jobId: job.id,
+    progressToken,
     message: 'Playlist generation started.'
   });
 }
@@ -193,14 +229,15 @@ async function fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, ex
  * Route: POST /api/playlist/process
  * Accepts an image file, parses it via Gemini, fetches Spotify recommendations.
  * Works for both authenticated and anonymous users.
+ * Returns jobId + progressToken for SSE/poll authorization.
  */
-router.post('/process', upload.single('image'), checkDailyLimit, async (req, res) => {
+router.post('/process', userApiLimiter, upload.single('image'), checkDailyLimit, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "Please upload an image file." });
   }
 
-  const filePath = req.file.path;
-  const mimeType = req.file.mimetype;
+  let filePath = req.file.path;
+  let mimeType = req.file.mimetype;
   const userId = await getAuthUserId(req);
 
   if (process.env.NODE_ENV === 'test' && userId) {
@@ -218,19 +255,23 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
   }
 
   try {
+    // Convert HEIC/HEIF → JPEG and strip EXIF where needed
+    const normalized = await normalizeUploadImage(filePath, mimeType);
+    filePath = normalized.path;
+    mimeType = normalized.mimeType;
+    req.file.path = filePath;
+    req.file.mimetype = mimeType;
+
     // Keep only a small thumbnail in-process. The full image is uploaded before
     // queueing and is never serialized into the Redis job payload.
     const fileBuffer = await fs.promises.readFile(filePath);
     const imageThumb = await createThumbnailDataUrl(fileBuffer, mimeType);
 
-    // 2. Upload file to storage provider (S3/R2 or local fallback) immediately (fast path)
+    // Upload to Spaces/S3 (durable) or local /uploads fallback
     console.log("Uploading file to storage provider...");
     const webImagePath = await uploadFile(filePath, mimeType);
     console.log(`File uploaded successfully. Web URL/Path: ${webImagePath}`);
 
-    // Remote storage (S3/R2) removes the temp file inside uploadFile; keep local uploads on disk for /uploads static + regenerate.
-
-    // Use locally persisted tracks instead of downloading previous playlists from Spotify.
     let excludedSongs = [];
     if (userId) {
       try {
@@ -239,8 +280,6 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
         console.warn('Failed to retrieve previous track exclusions:', dbErr);
       }
     }
-
-    // Token deduction removed — daily limit enforced in checkDailyLimit middleware
 
     let userTier = 'free';
     if (userId) {
@@ -259,26 +298,11 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
       trackLimit: trackLimitForTier(userTier)
     };
 
-    // ─── Test Mode: Run Synchronously ──────────────────────────────────────────
-    if (process.env.NODE_ENV === 'test') {
-      console.log("[TEST] Running playlist generation synchronously...");
-      const result = await processPlaylistJob(jobData);
-      return res.json(result);
-    }
-
-    // ─── Production Mode: Queue Asynchronously ─────────────────────────────────
-    console.log("Enqueuing playlist generation job...");
-    const job = await playlistQueue.add('playlist-generation', jobData);
-    
-    return res.status(202).json({
-      success: true,
-      jobId: job.id,
-      message: 'Playlist generation started.'
-    });
+    return enqueueOrRunJob(jobData, res);
 
   } catch (error) {
     console.error("Error in process-image route:", error);
-    if (fs.existsSync(filePath)) {
+    if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
     res.status(500).json({ success: false, message: error.message });
@@ -287,17 +311,19 @@ router.post('/process', upload.single('image'), checkDailyLimit, async (req, res
 
 /**
  * Route: GET /api/playlist/job/:jobId/stream
- * Server-Sent Events (SSE) endpoint to stream playlist generation progress.
+ * SSE progress — requires owner JWT or ?progressToken= / X-Progress-Token.
  */
 router.get('/job/:jobId/stream', async (req, res) => {
   const { jobId } = req.params;
   const jobIdKey = String(jobId);
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx/proxy buffering
-  res.flushHeaders();
+  const sendSseHeaders = () => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+  };
 
   let isClosed = false;
   let heartbeatTimer = null;
@@ -313,7 +339,7 @@ router.get('/job/:jobId/stream', async (req, res) => {
     playlistQueueEvents?.off('completed', onCompleted);
     playlistQueueEvents?.off('failed', onFailed);
     playlistQueueEvents?.off('delayed', onDelayed);
-    res.end();
+    if (!res.writableEnded) res.end();
   };
 
   req.on('close', cleanup);
@@ -363,19 +389,30 @@ router.get('/job/:jobId/stream', async (req, res) => {
     }
   };
 
-  // Keep proxies from closing idle SSE sockets during long Spotify resolve / Gemini backoff
-  heartbeatTimer = setInterval(() => {
-    if (isClosed) return;
-    res.write(`: heartbeat ${Date.now()}\n\n`);
-  }, 15000);
-
   try {
+    if (!playlistQueue) {
+      return res.status(503).json({
+        success: false,
+        message: 'Queue unavailable in this environment'
+      });
+    }
+
     const job = await playlistQueue.getJob(jobIdKey);
     if (!job) {
-      res.write(`event: failed\ndata: ${JSON.stringify({ message: 'Job not found' })}\n\n`);
-      cleanup();
-      return;
+      return res.status(404).json({ success: false, message: 'Job not found' });
     }
+
+    const access = await assertJobAccess(req, job);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+
+    sendSseHeaders();
+
+    heartbeatTimer = setInterval(() => {
+      if (isClosed) return;
+      res.write(`: heartbeat ${Date.now()}\n\n`);
+    }, 15000);
 
     const state = await job.getState();
     if (state === 'completed') {
@@ -400,8 +437,6 @@ router.get('/job/:jobId/stream', async (req, res) => {
     playlistQueueEvents.on('failed', onFailed);
     playlistQueueEvents.on('delayed', onDelayed);
 
-    // Cover the small gap between the initial state read and listener setup
-    // without returning to a per-client polling loop.
     const refreshedJob = await playlistQueue.getJob(jobIdKey);
     if (refreshedJob) {
       const refreshedState = await refreshedJob.getState();
@@ -414,6 +449,9 @@ router.get('/job/:jobId/stream', async (req, res) => {
 
   } catch (err) {
     console.error(`[SSE Stream] Error fetching job state for ${jobIdKey}:`, err);
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
     res.write(`event: failed\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
     cleanup();
   }
@@ -421,7 +459,7 @@ router.get('/job/:jobId/stream', async (req, res) => {
 
 /**
  * Route: GET /api/playlist/job/:jobId
- * JSON status/result fallback when SSE drops (proxy idle timeout).
+ * JSON status/result fallback — requires owner JWT or progressToken.
  */
 router.get('/job/:jobId', async (req, res) => {
   const jobIdKey = String(req.params.jobId);
@@ -436,6 +474,11 @@ router.get('/job/:jobId', async (req, res) => {
     const job = await playlistQueue.getJob(jobIdKey);
     if (!job) {
       return res.status(404).json({ success: false, state: 'not_found', message: 'Job not found' });
+    }
+
+    const access = await assertJobAccess(req, job);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
     }
 
     const state = await job.getState();
@@ -514,7 +557,7 @@ router.post('/save', async (req, res) => {
  * Route: POST /api/playlist/suggest-more
  * Returns additional Spotify track suggestions based on existing analysis metadata.
  */
-router.post('/suggest-more', async (req, res) => {
+router.post('/suggest-more', userApiLimiter, async (req, res) => {
   const { metadata, excludeTrackIds = [], customPrompt = '' } = req.body;
 
   if (!metadata?.seedGenres) {
@@ -670,11 +713,8 @@ router.delete('/generation/:id', async (req, res) => {
 
     await db.generation.delete({ where: { id: row.id } });
 
-    // Best-effort local file cleanup (ignore remote S3/R2 URLs)
-    if (row.image_path?.startsWith('/uploads/')) {
-      const localPath = path.resolve(projectRoot, row.image_path.slice(1));
-      fs.promises.unlink(localPath).catch(() => {});
-    }
+    // Best-effort cleanup of local /uploads or Spaces/S3 object
+    await deleteStoredObject(row.image_path);
 
     const user = await db.user.findUnique({
       where: { id: userId },
@@ -693,7 +733,7 @@ router.delete('/generation/:id', async (req, res) => {
  * Route: POST /api/playlist/regenerate
  * Premium-only: re-run generation from a stored moment photo.
  */
-router.post('/regenerate', async (req, res) => {
+router.post('/regenerate', userApiLimiter, async (req, res) => {
   const userId = await getAuthUserId(req);
   if (!userId) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
