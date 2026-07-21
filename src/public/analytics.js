@@ -25,3 +25,15 @@ export function trackPhotoUploaded({ fileType, fileSize, hasCustomPrompt, userId
 
   gtag('event', 'photo_uploaded', params);
 }
+
+export function trackGenerateSoundtrackClicked({ fileType, fileSize, hasCustomPrompt, userId } = {}) {
+  if (typeof gtag !== 'function') return;
+
+  const params = {};
+  if (fileType) params.file_type = String(fileType);
+  if (Number.isFinite(fileSize)) params.file_size = fileSize;
+  if (typeof hasCustomPrompt === 'boolean') params.has_custom_prompt = hasCustomPrompt;
+  if (userId) params.user_id = String(userId);
+
+  gtag('event', 'generate_soundtrack_clicked', params);
+}
