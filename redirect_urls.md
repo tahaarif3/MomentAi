@@ -50,8 +50,8 @@ Configure these under **Authentication** ➔ **URL Configuration** in your Supab
 * Prefer Universal / App Links: `https://momentai.dev/auth/callback`
 * Fallback custom scheme: `momentai://auth/callback`
 * Host files (served by this web app):
-  - `/.well-known/apple-app-site-association`
-  - `/.well-known/assetlinks.json` (replace Play signing cert fingerprint before release)
+  - `/.well-known/apple-app-site-association` — replace `TEAMID` with your Apple Developer Team ID (`TEAMID.dev.momentai.app`)
+  - `/.well-known/assetlinks.json` — replace `REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256` with Play App Signing cert SHA-256
 
 ---
 
@@ -87,3 +87,6 @@ Stripe Checkout remains **web-only**. Native Premium uses StoreKit / Play Billin
   ```
 * **Authorization**: Bearer token matching `REVENUECAT_WEBHOOK_SECRET`
 * Maps store entitlements → `users.tier` (`premium` / `free`)
+* Enable on API host: `MOBILE_STORE_BILLING_ENABLED=true`
+* Mobile client needs `VITE_REVENUECAT_IOS_API_KEY` / `VITE_REVENUECAT_ANDROID_API_KEY` at build time
+* Full launch checklist: `momentai-mobile` → `docs/app-store-launch-plan.md`
