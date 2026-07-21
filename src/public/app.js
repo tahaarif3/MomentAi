@@ -19,6 +19,7 @@ import {
   stopDemoTicker
 } from './history.js';
 import { buildShareCardDom, downloadShareCardPng, copyPlaylistLink } from './share-card.js';
+import { trackPlaylistCreated, trackPhotoUploaded, trackGenerateSoundtrackClicked } from './analytics.js';
 
 // If running in Capacitor (protocol is capacitor: or hostname is localhost with no port),
 // point to the hosted backend. Otherwise, use relative paths.
@@ -474,6 +475,13 @@ function setupEventListeners() {
   if (btnGeneratePlaylist) {
     btnGeneratePlaylist.addEventListener('click', async () => {
       if (stagedFile) {
+        const customPromptInput = document.getElementById('customTextPrompt');
+        trackGenerateSoundtrackClicked({
+          fileType: stagedFile.type,
+          fileSize: stagedFile.size,
+          hasCustomPrompt: Boolean(customPromptInput?.value?.trim()),
+          userId: authState.user?.id
+        });
         setButtonLoading(btnGeneratePlaylist, true);
         await beginGenerationWithFile(stagedFile);
       }
@@ -1023,6 +1031,14 @@ async function uploadAndProcessImage(file) {
     }
 
     const data = await res.json();
+
+    trackPhotoUploaded({
+      fileType: file.type,
+      fileSize: file.size,
+      hasCustomPrompt: Boolean(customPromptInput?.value?.trim()),
+      userId: authState.user?.id,
+      jobId: data.jobId
+    });
 
     if (data.jobId) {
       console.log(`Job queued successfully with ID: ${data.jobId}`);
@@ -1904,7 +1920,14 @@ async function confirmSavePlaylistToSpotify() {
     btnSavePlaylist.className = 'btn btn-secondary';
     btnSavePlaylist.classList.remove('is-loading');
     btnSavePlaylist.disabled = false;
-    
+
+    trackPlaylistCreated({
+      playlistId: data.playlistId,
+      playlistName,
+      trackCount: trackUris.length,
+      userId: authState.user?.id
+    });
+
     showExportSuccessModal(playlistName, data.playlistUrl);
 
   } catch (error) {
