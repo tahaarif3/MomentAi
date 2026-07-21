@@ -48,7 +48,10 @@ export function trackLimitForTier(tier) {
   return tier === 'premium' ? PREMIUM_TRACK_LIMIT : FREE_TRACK_LIMIT;
 }
 
-/** Slim Spotify track objects for JSON persistence. */
+/**
+ * Slim track objects for JSON persistence.
+ * Platform-agnostic fields (isrc, appleCatalogId, odesliLink) enable multi-target output.
+ */
 export function slimTrack(track) {
   if (!track?.id) return null;
   return {
@@ -61,7 +64,10 @@ export function slimTrack(track) {
       images: track.album?.images || []
     },
     duration_ms: track.duration_ms,
-    preview_url: track.preview_url ?? null
+    preview_url: track.preview_url ?? null,
+    isrc: track.external_ids?.isrc || track.isrc || null,
+    appleCatalogId: track.appleCatalogId ?? null,
+    odesliLink: track.odesliLink ?? null
   };
 }
 
@@ -86,4 +92,11 @@ export function trackExclusions(tracks, limit = 50) {
     if (exclusions.length >= limit) break;
   }
   return exclusions;
+}
+
+/** Public share URL for a generation (Odesli universal-link surface). */
+export function publicPlaylistUrl(generationId, baseUrl = process.env.APP_BASE_URL) {
+  if (!generationId) return null;
+  const base = (baseUrl || 'https://momentai.dev').replace(/\/$/, '');
+  return `${base}/p/${generationId}`;
 }

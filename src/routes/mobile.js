@@ -23,7 +23,16 @@ router.get('/compatibility', (req, res) => {
     features: {
       masterSpotifyExport: true,
       storeBilling: process.env.MOBILE_STORE_BILLING_ENABLED === 'true',
-      stripeCheckoutInApp: false
+      stripeCheckoutInApp: false,
+      multiTargetLinks: true,
+      appleMusicSave: process.env.APPLE_MUSIC_ENABLED === 'true',
+      appleMusicDevToken:
+        process.env.NODE_ENV === 'test' ||
+        Boolean(
+          process.env.APPLE_MUSIC_TEAM_ID &&
+            process.env.APPLE_MUSIC_KEY_ID &&
+            process.env.APPLE_MUSIC_PRIVATE_KEY
+        )
     }
   });
 });

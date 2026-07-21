@@ -1115,9 +1115,10 @@ export async function getPlaylistTracks(token, playlistId) {
  */
 export async function searchTrackByDetails(token, title, artist) {
   if (process.env.NODE_ENV === 'test') {
+    const id = `mock_track_${Buffer.from(title).toString('hex').slice(0, 8)}`;
     return {
-      id: `mock_track_${Buffer.from(title).toString('hex').slice(0, 8)}`,
-      uri: `spotify:track:mock_track_${Buffer.from(title).toString('hex').slice(0, 8)}`,
+      id,
+      uri: `spotify:track:${id}`,
       name: title,
       artists: [{ name: artist }],
       album: {
@@ -1129,7 +1130,10 @@ export async function searchTrackByDetails(token, title, artist) {
         ]
       },
       duration_ms: 180000,
-      preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+      preview_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+      external_ids: {
+        isrc: `USMOCK${Buffer.from(title).toString('hex').slice(0, 7).toUpperCase()}`.padEnd(12, '0')
+      }
     };
   }
 
@@ -1205,6 +1209,52 @@ export async function searchTrackByDetails(token, title, artist) {
     console.warn(`Failed to search track "${title}" by "${artist}":`, err);
     return null;
   }
+}
+
+/**
+ * Batch-fetch Spotify track objects by ID (includes external_ids.isrc).
+ * @param {string} token
+ * @param {string[]} ids
+ * @returns {Promise<object[]>}
+ */
+export async function getTracksByIds(token, ids = []) {
+  const unique = [...new Set((ids || []).filter(Boolean))];
+  if (!unique.length) return [];
+
+  if (process.env.NODE_ENV === 'test') {
+    return unique.map((id) => ({
+      id,
+      uri: `spotify:track:${id}`,
+      name: `Mock ${id}`,
+      artists: [{ name: 'Mock Artist' }],
+      album: { name: 'Mock Album', images: [] },
+      duration_ms: 180000,
+      preview_url: null,
+      external_ids: { isrc: `USMOCK${String(id).replace(/\W/g, '').slice(0, 7).toUpperCase()}`.padEnd(12, '0') }
+    }));
+  }
+
+  const out = [];
+  for (let i = 0; i < unique.length; i += 50) {
+    const chunk = unique.slice(i, i + 50);
+    const url = `https://api.spotify.com/v1/tracks?ids=${encodeURIComponent(chunk.join(','))}`;
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        console.warn(`[Spotify] getTracksByIds failed: ${response.status}`);
+        continue;
+      }
+      const data = await response.json();
+      for (const track of data.tracks || []) {
+        if (track?.id) out.push(track);
+      }
+    } catch (err) {
+      console.warn('[Spotify] getTracksByIds error:', err.message);
+    }
+  }
+  return out;
 }
 
 export function getRateLimitResetTime() {

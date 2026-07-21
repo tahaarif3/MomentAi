@@ -14,10 +14,11 @@ import {
   getRemainingToday,
   effectiveDailyLimit,
   trackLimitForTier,
-  startOfUtcDay
+  startOfUtcDay,
+  trackExclusions,
+  publicPlaylistUrl
 } from '../utils/moments.js';
 import { createThumbnailDataUrl } from '../utils/thumbnail.js';
-import { trackExclusions } from '../utils/moments.js';
 import {
   issueProgressToken,
   verifyProgressToken,
@@ -25,6 +26,10 @@ import {
 } from '../utils/progressToken.js';
 import { createUserRateLimiter } from '../utils/userRateLimit.js';
 import { isAllowedImageMime, normalizeUploadImage } from '../utils/imageConvert.js';
+import {
+  ensureGenerationTrackLinks,
+  toPublicTrackLinks
+} from '../services/trackLinkService.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -155,6 +160,7 @@ function generationToProcessResult(row) {
   return {
     success: true,
     generationId: row.id,
+    shareUrl: publicPlaylistUrl(row.id),
     imagePath: displayImage,
     imageThumb: row.image_thumb || null,
     metadata: {
@@ -687,6 +693,39 @@ router.get('/generation/:id', async (req, res) => {
     res.json({ success: true, ...generationToProcessResult(row) });
   } catch (error) {
     console.error('Failed to fetch generation:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Route: GET /api/playlist/generation/:id/links
+ * Public multi-target track links (Odesli + Apple + Spotify). Lazy-backfills ISRC/links.
+ */
+router.get('/generation/:id/links', async (req, res) => {
+  try {
+    const enriched = await ensureGenerationTrackLinks(db, req.params.id);
+    if (!enriched) {
+      return res.status(404).json({ success: false, message: 'Playlist not found.' });
+    }
+
+    const tracks = toPublicTrackLinks(enriched.tracks || []);
+    const matchedApple = tracks.filter((t) => t.appleCatalogId).length;
+
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json({
+      success: true,
+      generationId: enriched.id,
+      shareUrl: publicPlaylistUrl(enriched.id),
+      title: enriched.emotional_vibe || enriched.playlist_name || 'MomentAI playlist',
+      description: enriched.environmental_context || null,
+      imagePath: enriched.image_thumb || enriched.image_path || null,
+      playlistUrl: enriched.playlist_url || null,
+      trackCount: tracks.length,
+      matchedAppleCount: matchedApple,
+      tracks
+    });
+  } catch (error) {
+    console.error('Failed to fetch playlist links:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

@@ -17,6 +17,44 @@ test.describe('Mobile API readiness (Phase 0)', () => {
     expect(typeof body.forceUpgrade).toBe('boolean');
     expect(body.features.masterSpotifyExport).toBe(true);
     expect(body.features.stripeCheckoutInApp).toBe(false);
+    expect(body.features.multiTargetLinks).toBe(true);
+    expect(typeof body.features.appleMusicSave).toBe('boolean');
+    expect(typeof body.features.appleMusicDevToken).toBe('boolean');
+  });
+
+  test('public playlist links endpoint shape for missing id', async ({ request }) => {
+    const res = await request.get('/api/playlist/generation/does-not-exist-uuid/links');
+    expect(res.status()).toBe(404);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
+
+  test('apple dev-token endpoint responds in test', async ({ request }) => {
+    const res = await request.get('/api/apple/dev-token');
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.token).toBeTruthy();
+  });
+
+  test('slimTrack preserves isrc fields', async () => {
+    const { slimTrack, publicPlaylistUrl } = await import('../src/utils/moments.js');
+    const slim = slimTrack({
+      id: 'abc',
+      uri: 'spotify:track:abc',
+      name: 'Song',
+      artists: [{ name: 'Artist' }],
+      album: { name: 'Alb', images: [] },
+      duration_ms: 1,
+      preview_url: null,
+      external_ids: { isrc: 'USTEST123456' },
+      appleCatalogId: '99',
+      odesliLink: 'https://song.link/x'
+    });
+    expect(slim.isrc).toBe('USTEST123456');
+    expect(slim.appleCatalogId).toBe('99');
+    expect(slim.odesliLink).toBe('https://song.link/x');
+    expect(publicPlaylistUrl('gen-1', 'https://momentai.dev')).toBe('https://momentai.dev/p/gen-1');
   });
 
   test('progress tokens bind to jobId and expire check', async () => {
