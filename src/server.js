@@ -14,6 +14,12 @@ import healthRouter from './routes/health.js';
 import adminRouter from './routes/admin.js';
 import mobileRouter from './routes/mobile.js';
 import billingRouter from './routes/billing.js';
+import appleRouter from './routes/apple.js';
+import {
+  ensureGenerationTrackLinks,
+  toPublicTrackLinks
+} from './services/trackLinkService.js';
+import { renderPublicPlaylistHtml } from './services/publicPlaylistPage.js';
 
 // Setup __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -142,9 +148,55 @@ app.use('/api/billing', apiLimiter, billingRouter); // Store entitlement webhook
 app.use('/api/playlist', apiLimiter, playlistRouter); // IP limiter fallback; per-user limits inside router
 app.use('/api/payment', apiLimiter, paymentRouter);   // Apply rate limiter to payments (web Stripe)
 app.use('/api/admin', apiLimiter, adminRouter);
+app.use('/api/apple', apiLimiter, appleRouter);
+
+/**
+ * Public share page — SSR with Open Graph tags (primary multi-target / viral surface).
+ * Must be registered before the SPA catch-all.
+ */
+app.get('/p/:id', async (req, res) => {
+  const appBase = (process.env.APP_BASE_URL || 'https://momentai.dev').replace(/\/$/, '');
+  try {
+    const enriched = await ensureGenerationTrackLinks(db, req.params.id);
+    if (!enriched) {
+      return res.status(404).send(`<!DOCTYPE html><html><head><title>Not found · MomentAI</title></head>
+<body style="font-family:system-ui;background:#17110c;color:#ece5da;padding:2rem">
+<a href="${appBase}" style="color:#e9a94f">MomentAI</a>
+<h1>Playlist not found</h1>
+<p>This share link may have expired or never existed.</p>
+</body></html>`);
+    }
+    const tracks = toPublicTrackLinks(enriched.tracks || []);
+    const html = renderPublicPlaylistHtml({ row: enriched, tracks, appBase });
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.type('html').send(html);
+  } catch (err) {
+    console.error('[/p/:id]', err);
+    res.status(500).send('Failed to render playlist');
+  }
+});
+
+/**
+ * Soft retirement of interactive web UI (flag-off → observe → remove).
+ * When WEB_INTERACTIVE_UI_ENABLED=false, `/` serves a store-CTA landing.
+ * Legal pages, auth callback, and /p/:id stay live regardless.
+ */
+const interactiveWebUi =
+  process.env.WEB_INTERACTIVE_UI_ENABLED !== 'false' &&
+  process.env.WEB_INTERACTIVE_UI_ENABLED !== '0';
+
+app.get('/', (req, res, next) => {
+  if (interactiveWebUi) return next();
+  return res.sendFile(path.join(publicDir, 'landing-app.html'));
+});
 
 // Fallback: Send public/index.html for any frontend SPA navigation
 app.get('*', (req, res) => {
+  // Keep legal / auth / delete pages as static files (already served above when present)
+  if (!interactiveWebUi && !req.path.match(/\.(html|js|css|png|jpg|svg|ico|json|txt|map)$/i)) {
+    // Continue-in-app interstitial for old interactive deep paths
+    return res.sendFile(path.join(publicDir, 'continue-in-app.html'));
+  }
   res.sendFile(path.resolve(__dirname, 'public/index.html'));
 });
 

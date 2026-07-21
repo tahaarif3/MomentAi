@@ -4,8 +4,9 @@ import db from '../config/db.js';
 import { parsePlaylistImage } from '../services/geminiService.js';
 import * as spotify from '../clients/spotifyClient.js';
 import crypto from 'crypto';
-import { slimTracks, FREE_TRACK_LIMIT } from '../utils/moments.js';
+import { slimTracks, FREE_TRACK_LIMIT, publicPlaylistUrl } from '../utils/moments.js';
 import { loadImageBytes } from '../utils/image.js';
+import { ensureIsrcs, enrichTrackLinks } from '../services/trackLinkService.js';
 
 // Helper to filter unique tracks
 function filterUniqueTracks(tracks, excludeTracks = []) {
@@ -160,33 +161,42 @@ export async function processPlaylistJob(jobData, updateProgressFn = async () =>
     ? await fetchSupplementaryTracks(spotifyToken, metadata, customPrompt, cappedTracks)
     : [];
 
-  const slimmedTracks = slimTracks(cappedTracks);
-  const slimmedSuggested = slimTracks(suggestedTracks);
+  // Backfill ISRCs (and Odesli/Apple when configured) once at generation time.
+  await ensureIsrcs(cappedTracks, spotifyToken);
+  await ensureIsrcs(suggestedTracks, spotifyToken);
 
-  // Save generation (logged-in users only) — after tracks are resolved
-  if (userId) {
-    await db.generation.create({
-      data: {
-        id: generationId,
-        user_id: userId,
-        image_path: webImagePath,
-        image_thumb: imageThumb || null,
-        dominant_colors: JSON.stringify(metadata.dominantColorPalette),
-        environmental_context: metadata.environmentalContext,
-        emotional_vibe: metadata.emotionalVibe,
-        seed_genres: JSON.stringify(metadata.seedGenres),
-        valence: metadata.valence,
-        energy: metadata.energy,
-        acousticness: metadata.acousticness,
-        tracks: slimmedTracks,
-        suggested_tracks: slimmedSuggested
-      }
-    });
+  let slimmedTracks = slimTracks(cappedTracks);
+  let slimmedSuggested = slimTracks(suggestedTracks);
+  try {
+    slimmedTracks = await enrichTrackLinks(slimmedTracks);
+    slimmedSuggested = await enrichTrackLinks(slimmedSuggested, { resolveApple: false });
+  } catch (linkErr) {
+    console.warn('[Worker] Track link enrichment failed (non-fatal):', linkErr.message);
   }
+
+  // Always persist so /p/:id share pages work (user_id may be null for anonymous).
+  await db.generation.create({
+    data: {
+      id: generationId,
+      user_id: userId || null,
+      image_path: webImagePath,
+      image_thumb: imageThumb || null,
+      dominant_colors: JSON.stringify(metadata.dominantColorPalette),
+      environmental_context: metadata.environmentalContext,
+      emotional_vibe: metadata.emotionalVibe,
+      seed_genres: JSON.stringify(metadata.seedGenres),
+      valence: metadata.valence,
+      energy: metadata.energy,
+      acousticness: metadata.acousticness,
+      tracks: slimmedTracks,
+      suggested_tracks: slimmedSuggested
+    }
+  });
 
   return {
     success: true,
-    generationId: userId ? generationId : null,
+    generationId,
+    shareUrl: publicPlaylistUrl(generationId),
     imagePath: imageThumb || webImagePath,
     imageThumb: imageThumb || null,
     metadata,

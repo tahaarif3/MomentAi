@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MomentAI — Turn moments into music</title>
+  <meta name="description" content="One photo. One playlist. Get MomentAI on iOS and Android." />
+  <meta name="apple-itunes-app" content="app-id=PLACEHOLDER" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --bg:#17110c; --text:#ece5da; --muted:#9a8f80; --accent:#e9a94f; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--text);
+      font-family: "Space Grotesk", system-ui, sans-serif;
+      background:
+        radial-gradient(ellipse 90% 55% at 70% 0%, rgba(233,169,79,0.22), transparent 55%),
+        linear-gradient(165deg, #17110c, #2a1f16 70%);
+      display: grid; place-items: center; padding: 2rem;
+    }
+    .card { max-width: 420px; text-align: left; }
+    .brand {
+      font-family: "Space Mono", monospace; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--accent); font-size: 0.85rem;
+    }
+    h1 { font-size: clamp(2.4rem, 8vw, 3.4rem); line-height: 1.05; margin: 12px 0; }
+    p { color: var(--muted); line-height: 1.5; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    a.btn {
+      display: inline-block; text-decoration: none; font-weight: 700;
+      padding: 14px 18px; border-radius: 999px; background: var(--accent); color: #17110c;
+    }
+    a.btn.ghost { background: transparent; color: var(--accent); border: 1px solid rgba(233,169,79,0.35); }
+    footer { margin-top: 40px; font-size: 0.85rem; color: var(--muted); }
+    footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <p class="brand">MomentAI</p>
+    <h1>Catch the light.</h1>
+    <p>One photo. One playlist. Yours — open in Spotify, Apple Music, or anywhere.</p>
+    <div class="actions">
+      <a class="btn" href="https://apps.apple.com/">App Store</a>
+      <a class="btn ghost" href="https://play.google.com/store">Google Play</a>
+    </div>
+    <footer>
+      <a href="/privacy.html">Privacy</a> ·
+      <a href="/terms.html">Terms</a> ·
+      <a href="/delete-account.html">Delete account</a>
+    </footer>
+  </main>
+</body>
+</html>
