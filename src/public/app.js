@@ -19,7 +19,7 @@ import {
   stopDemoTicker
 } from './history.js';
 import { buildShareCardDom, downloadShareCardPng, copyPlaylistLink } from './share-card.js';
-import { trackPlaylistCreated } from './analytics.js';
+import { trackPlaylistCreated, trackPhotoUploaded } from './analytics.js';
 
 // If running in Capacitor (protocol is capacitor: or hostname is localhost with no port),
 // point to the hosted backend. Otherwise, use relative paths.
@@ -1024,6 +1024,14 @@ async function uploadAndProcessImage(file) {
     }
 
     const data = await res.json();
+
+    trackPhotoUploaded({
+      fileType: file.type,
+      fileSize: file.size,
+      hasCustomPrompt: Boolean(customPromptInput?.value?.trim()),
+      userId: authState.user?.id,
+      jobId: data.jobId
+    });
 
     if (data.jobId) {
       console.log(`Job queued successfully with ID: ${data.jobId}`);

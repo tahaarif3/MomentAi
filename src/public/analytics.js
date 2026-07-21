@@ -12,3 +12,16 @@ export function trackPlaylistCreated({ playlistId, playlistName, trackCount, use
 
   gtag('event', 'playlist_created', params);
 }
+
+export function trackPhotoUploaded({ fileType, fileSize, hasCustomPrompt, userId, jobId } = {}) {
+  if (typeof gtag !== 'function') return;
+
+  const params = {};
+  if (fileType) params.file_type = String(fileType);
+  if (Number.isFinite(fileSize)) params.file_size = fileSize;
+  if (typeof hasCustomPrompt === 'boolean') params.has_custom_prompt = hasCustomPrompt;
+  if (userId) params.user_id = String(userId);
+  if (jobId) params.job_id = String(jobId);
+
+  gtag('event', 'photo_uploaded', params);
+}
