@@ -19,6 +19,7 @@ import {
   stopDemoTicker
 } from './history.js';
 import { buildShareCardDom, downloadShareCardPng, copyPlaylistLink } from './share-card.js';
+import { trackPlaylistCreated } from './analytics.js';
 
 // If running in Capacitor (protocol is capacitor: or hostname is localhost with no port),
 // point to the hosted backend. Otherwise, use relative paths.
@@ -1904,7 +1905,14 @@ async function confirmSavePlaylistToSpotify() {
     btnSavePlaylist.className = 'btn btn-secondary';
     btnSavePlaylist.classList.remove('is-loading');
     btnSavePlaylist.disabled = false;
-    
+
+    trackPlaylistCreated({
+      playlistId: data.playlistId,
+      playlistName,
+      trackCount: trackUris.length,
+      userId: authState.user?.id
+    });
+
     showExportSuccessModal(playlistName, data.playlistUrl);
 
   } catch (error) {
