@@ -12,11 +12,22 @@ MomentAI is a Node.js/Express monolith: vanilla JS frontend in `src/public/`, Pr
 | Redis 7 | Yes (non-test) | Worker queue; skipped when `NODE_ENV=test` (sync job path) |
 | Express `npm run dev` | Yes | Port 3000; kill before `npm test` if Playwright webServer conflicts |
 
-Postgres/Redis are not systemd-managed in this VM — start manually if stopped.
+Postgres/Redis are not systemd-managed in this VM — start manually if stopped:
+`sudo service postgresql start` and `sudo service redis-server start`.
+
+First-time DB bootstrap (already done in the snapshot; redo only if the cluster is wiped): create role `momentai`/`momentai` and DBs `momentai_dev` + `momentai_test` owned by it, then `npm run db:migrate`. The dev `.env` (untracked, present in snapshot) points at `postgresql://momentai:momentai@localhost:5432/momentai_dev`, local Redis, and **dummy** Gemini/Spotify/Supabase keys.
 
 ### Standard commands
 
 See `package.json`: `npm run dev`, `npm test`, `npm run db:migrate`, `npx prisma generate`.
+
+### Demoing playlist generation without paid keys
+
+Real generation calls Gemini + Spotify (only mocked when `NODE_ENV=test`). With dummy keys, run the server as `NODE_ENV=test npm start` to exercise the full upload→playlist pipeline with mocked externals. Anonymous users see the generated tracks **blurred** behind a sign-in paywall; the authed/unblurred flow is covered by `tests/playlist_save.spec.js` (Supabase auth mocked via Playwright route interception).
+
+### Mobile client (`../momentai-mobile`)
+
+Separate repo: Capacitor + Vite web client. `npm run dev` → Vite on port **5173** bound to `localhost` (not `127.0.0.1`, so curl `http://localhost:5173`). `VITE_API_BASE` in its `.env` points at the backend (`http://127.0.0.1:3000` locally). Unit tests: `npm run test:unit` (`node --test`). Native builds (`cap:android`/`cap:ios`) need Android/Xcode toolchains not present in this VM.
 
 ### UI v2 (camera-first)
 
